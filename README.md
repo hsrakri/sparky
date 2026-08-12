@@ -143,6 +143,8 @@ Single-stream, temperature 0, localhost, measured on this box:
 
 Nemotron KV cache pool: **31.4 GiB ≈ 9.56 M tokens** (fp8), 72.97× concurrency @ 131 K ctx. Both resident → system at ~115/121 GiB.
 
+**Overnight delegation soak:** 150 back-to-back delegated coding tasks, **97.3% pass, 100% delegation, 0 infra failures, $0** → [`benchmarks/overnight-soak-2026-08-12/`](benchmarks/overnight-soak-2026-08-12/).
+
 > ⚠️ Not apples-to-apples: Nemotron runs eager (no graphs/spec-decode) and is a reasoning model with thinking on; Qwen has thinking disabled. Nemotron's 50 tok/s is a floor, not its ceiling.
 
 ## Verify
