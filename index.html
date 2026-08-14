@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sparky — DGX Spark recipes</title>
+<style>
+  :root{--bg:#0b0f14;--card:#141b24;--ink:#eef3f8;--sub:#9fb0c0;--nv:#76b900;--qw:#7c5cff;--line:#243040}
+  *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  body{background:radial-gradient(900px 500px at 85% -10%,rgba(118,185,0,.12),transparent 60%),radial-gradient(900px 500px at -10% 110%,rgba(124,92,255,.14),transparent 60%),var(--bg);color:var(--ink);min-height:100vh;padding:48px 20px}
+  .wrap{max-width:880px;margin:0 auto}
+  .kicker{color:var(--sub);letter-spacing:.14em;text-transform:uppercase;font-size:13px;font-weight:600}
+  h1{font-size:44px;margin:8px 0 6px;font-weight:800}
+  h1 .g{background:linear-gradient(90deg,var(--nv),var(--qw));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--sub);font-size:17px;margin-bottom:36px;line-height:1.5}
+  .grid{display:grid;gap:18px}
+  a.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 24px;text-decoration:none;color:var(--ink);transition:border-color .15s}
+  a.card:hover{border-color:var(--nv)}
+  .tag{display:inline-block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:3px 10px;border-radius:999px;margin-bottom:10px}
+  .tag.recipe{background:rgba(118,185,0,.15);color:var(--nv)}
+  .tag.bench{background:rgba(124,92,255,.15);color:#a99aff}
+  .card h2{font-size:21px;margin-bottom:6px}
+  .card p{color:var(--sub);font-size:15px;line-height:1.5}
+  .meta{color:var(--sub);font-size:13px;margin-top:10px}
+  .foot{margin-top:40px;color:var(--sub);font-size:14px}
+  .foot a{color:var(--nv);text-decoration:none}
+  code{background:#0c1219;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:.92em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">hsrakri / sparky · home-lab inference engineering</div>
+  <h1>DGX Spark <span class="g">recipes</span></h1>
+  <p class="sub">Real configs, real benchmarks, every error message and fix — from running multi-model agent stacks on a single NVIDIA DGX Spark (GB10, ~121.7&nbsp;GiB unified). Built in the home lab by <b>hsrakri</b> with <b>krishavh</b>.</p>
+
+  <div class="grid">
+    <a class="card" href="README.md">
+      <span class="tag recipe">Recipe 01</span>
+      <h2>Co-locating 2× 30B models on one GB10</h2>
+      <p>Nemotron-3.5-Lightning (orchestrator) + Qwen coder side-by-side under vLLM. The per-process memory-utilization rules, sequential startup, enforce-eager for hybrid Mamba-MoE, deterministic reboot ordering, and Hermes orchestrator→coder wiring.</p>
+      <div class="meta">vLLM v0.26.0 · NVFP4 · 0.45 + 0.42 · 4 failure modes documented</div>
+    </a>
+
+    <a class="card" href="recipes/qwen38-27b-dense-optimization.md">
+      <span class="tag recipe">Recipe 02</span>
+      <h2>Qwen3.8-27B dense on GB10 — beating the bandwidth roofline</h2>
+      <p>Serving a dense 27B NVFP4 coder on one Spark: why it decodes ~12 tok/s at the memory-bandwidth roofline, and how n-gram speculative decoding + prefix caching claw back real speed with no draft model and no quality loss.</p>
+      <div class="meta">unsloth/Qwen3.8-27B-NVFP4 · ngram spec-decode · measured before/after</div>
+    </a>
+
+    <a class="card" href="benchmarks/overnight-soak-2026-08-12/README.md">
+      <span class="tag bench">Benchmark 01</span>
+      <h2>Overnight delegation soak — 150 tasks</h2>
+      <p>150 back-to-back coding tasks through the orchestrator→coder pipeline. 97.3% pass, 100% delegation, zero infra failures, $0 API cost.</p>
+      <div class="meta">~1,348 local LLM calls · results.csv included</div>
+    </a>
+
+    <a class="card" href="benchmarks/stress-corrections/README.md">
+      <span class="tag bench">Benchmark 02</span>
+      <h2>Multi-turn correction stress — 75 cycles</h2>
+      <p>Write intense code → run it → feed the real error back → revise. Finding: the orchestrator delegates the hard first draft (~22 calls/task) but patches corrections inline. Failures are coder over-iteration timeouts, never the pipeline.</p>
+      <div class="meta">1,785 delegated calls · per-task pass rates · results.csv included</div>
+    </a>
+  </div>
+
+  <p class="foot">
+    Repo: <a href="https://github.com/hsrakri/sparky">github.com/hsrakri/sparky</a> · MIT · model weights remain under their upstream licenses.
+    Hardware: 1× DGX Spark (GB10, aarch64) · Runtime: <code>vllm/vllm-openai:v0.26.0-aarch64</code>
+  </p>
+</div>
+</body>
+</html>

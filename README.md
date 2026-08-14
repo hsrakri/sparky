@@ -143,7 +143,9 @@ Single-stream, temperature 0, localhost, measured on this box:
 
 Nemotron KV cache pool: **31.4 GiB ≈ 9.56 M tokens** (fp8), 72.97× concurrency @ 131 K ctx. Both resident → system at ~115/121 GiB.
 
-**Overnight delegation soak:** 150 back-to-back delegated coding tasks, **97.3% pass, 100% delegation, 0 infra failures, $0** → [`benchmarks/overnight-soak-2026-08-12/`](benchmarks/overnight-soak-2026-08-12/).
+**Overnight delegation soak:** 150 back-to-back delegated coding tasks, **97.3% pass, 100% delegation, 0 infra failures, $0** → [`benchmarks/overnight-soak-2026-08-12/`](benchmarks/overnight-soak-2026-08-12/). **Correction stress:** 75 multi-turn cycles → [`benchmarks/stress-corrections/`](benchmarks/stress-corrections/).
+
+> **Update 2026-08-14:** the coder on `:8000` is now **Qwen3.8-27B (dense NVFP4)** — see **[Recipe 02: dense-27B optimization on GB10](recipes/qwen38-27b-dense-optimization.md)** (roofline math, n-gram spec-decode 1.9× + its tool-calling gotcha, final config). Repo index: [`index.html`](index.html).
 
 > ⚠️ Not apples-to-apples: Nemotron runs eager (no graphs/spec-decode) and is a reasoning model with thinking on; Qwen has thinking disabled. Nemotron's 50 tok/s is a floor, not its ceiling.
 
