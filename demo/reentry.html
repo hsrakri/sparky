@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Re-entry Simulation</title>
+  <style>
+    :root {
+      --bg: #050512;
+      --fg: #e0e0e0;
+      --muted: #4a4a5a;
+      --accent: #00d4aa;
+      --card: #0a0a1a;
+      --danger: #ff4757;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .app {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    canvas {
+      display: block;
+      background: #000;
+    }
+
+    .hud {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 20px;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--muted);
+    }
+
+    .panel {
+      background: var(--card);
+      padding: 15px;
+      border-radius: 8px;
+    }
+
+    .panel h3 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .readout {
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 14px;
+      min-height: 1.3em;
+    }
+
+    .readout span {
+      display: block;
+    }
+
+    .readout .value {
+      color: var(--accent);
+    }
+
+    .readout .warning {
+      color: var(--danger);
+    }
+
+    .controls {
+      margin-top: 20px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .controls button {
+      background: var(--accent);
+      border: none;
+      color: var(--bg);
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .controls button:hover {
+      opacity: 0.9;
+    }
+
+    .controls button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 180px;
+    }
+
+    .slider-group label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+    }
+
+    .slider-group input {
+      height: 8px;
+      background: var(--muted);
+    }
+
+    .slider-group input::-webkit-slider-thumb {
+      width: 18px;
+      height: 18px;
+      background: var(--accent);
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: -5px;
+    }
+
+    .info {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <canvas id="canvas" width="1200" height="800"></canvas>
+
+    <div class="hud">
+      <div class="panel">
+        <h3>VEHICLE</h3>
+        <div class="readout" id="vehicle-readout">
+          <span><span class="label">Altitude:</span> <span class="value" id="alt-value">--</span> km</span>
+          <span><span class="label">Velocity:</span> <span class="value" id="vel-value">--</span> km/s</span>
+          <span><span class="label">Mach:</span> <span class="value" id="mach-value">--</span></span>
+          <span><span class="label">Flight Path:</span> <span class="value" id="gamma-value">--</span>°</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>ENVIRONMENT</h3>
+        <div class="readout" id="env-readout">
+          <span><span class="label">Heat Flux:</span> <span class="value" id="heat-value">--</span> W/m²</span>
+          <span><span class="label">g-Force:</span> <span class="value" id="g-value">--</span>g</span>
+          <span><span class="label">Shield:</span> <span class="value" id="shield-value">--</span> mm</span>
+          <span><span class="label">Temp:</span> <span class="value" id="temp-value">--</span> K</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>STATUS</h3>
+        <div class="readout" id="status-readout">
+          <span><span class="label">Verdict:</span> <span class="value" id="verdict-value">--</span></span>
+          <span><span class="label">Time:</span> <span class="value" id="time-value">--</span> s</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="launch-btn">Launch</button>
+      <button id="reset-btn">Reset</button>
+      <button id="pause-btn">Pause</button>
+
+      <div class="slider-group">
+        <label for="entry-velocity">Velocity (km/s)</label>
+        <input type="range" id="entry-velocity" min="7" max="12" step="0.1" value="11">
+        <span id="vel-value">11</span>
+      </div>
+
+      <div class="slider-group">
+        <label for="entry-angle">Entry Angle (degrees)</label>
+        <input type="range" id="entry-angle" min="-12" max="-1" step="0.1" value="-6.5">
+        <span id="angle-value">-6.5</span>
+      </div>
+
+      <div class="slider-group">
+        <label for="ballistic-coefficient">Ballistic Coefficient</label>
+        <input type="range" id="ballistic-coefficient" min="100" max="10000" step="50" value="1000">
+        <span id="bc-value">1000</span>
+      </div>
+
+      <div class="slider-group">
+        <label for="shield-thickness">Shield Thickness (mm)</label>
+        <input type="range" id="shield-thickness" min="1" max="20" step="0.5" value="12">
+        <span id="shield-value">12</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="info">
+    Velocity: 7-12 km/s | Angle: -12 to -1° | BC: 100-10000 kg/m² | Shield: 1-20 mm
+  </div>
+
+  <script>
+    // ============================================================
+    // CONFIGURATION
+    // ============================================================
+    const cfg = {
+      // Atmosphere
+      rho0: 1.225,          // sea-level density kg/m^3
+      H: 8500,              // scale height m
+      // Gravity
+      g0: 9.80665,          // surface gravity m/s^2
+      Re: 6371000,          // Earth radius m
+      // Drag / ballistic coefficient
+      // beta = m/(Cd*A) kg/m^2, varied by slider
+      // Heating (Sutton-Graves)
+      kSutter: 1.7415e-4,   // Sutton-Graves constant
+      noseRadius: 5.0,      // Rn nose radius m
+      sigmaSB: 5.6704e-8,   // Stefan-Boltzmann W/m^2/K^4
+      // Blackout
+      blackoutTempK: 1800,  // surface temp K for ionization
+      // Ablation
+      ablationFactor: 1.0e-10, // m/s per (W/m^2 - threshold)
+      ablationThreshold: 1000000, // W/m^2 - above this, ablation occurs
+      // Parachutes
+      drogueAltitude: 12000,    // m - drogue deploy altitude
+      mainAltitude: 6000,       // m - main deploy altitude
+      drogueQdynMax: 2000,     // Pa - max dynamic pressure for drogue
+      mainQdynMax: 500,        // Pa - max dynamic pressure for main
+      // Limits
+      gLimit: 15,              // g - crew survivability
+      terminalVel: 5,          // m/s - soft landing threshold
+      // Canvas scaling
+      earthCenterX: 180,       // px - Earth center
+      earthCenterY: 500,       // px - Earth center
+      earthRadius: 130,        // px - visual Earth radius
+      // Entry
+      maxVisibleDownrange: 5000000,  // 5000 km
+    };
+    window.cfg = cfg;  // exposed for tuning/inspection
+
+    // ============================================================
+    // SIMULATION STATE
+    // ============================================================
+    let state = {
+      // Flight state
+      h: 120000,     // altitude m (start at 120km)
+      v: 0,          // velocity m/s
+      gamma: 0,      // flight path angle radians (negative = entry)
+      x: 0,          // downrange distance m
+      t: 0,          // simulation time s
+
+      // Shield state
+      shieldThickness: 12,   // mm, initial shield thickness (set from slider)
+      shieldTemp: 300,      // K, initial shield temperature
+
+      // Drag state
+      beta: 1000,      // ballistic coefficient kg/m^2, set by slider
+      dragMult: 1,     // parachute drag multiplier
+
+      // Trajectory history
+      history: [],     // array of {x, h, t}
+
+      // Flags
+      flying: false,
+      paused: true,
+      landed: false,
+      verdict: null,
+      blackout: false,
+
+      // Peak tracking
+      peakG: 0,
+      maxHeat: 0,
+    };
+    window.state = state;  // exposed for inspection
+
+    // ============================================================
+    // DOM ELEMENTS
+    // ============================================================
+    const elem = {
+      canvas: document.getElementById('canvas'),
+      ctx: null,
+      launchBtn: document.getElementById('launch-btn'),
+      resetBtn: document.getElementById('reset-btn'),
+      pauseBtn: document.getElementById('pause-btn'),
+      velocitySlider: document.getElementById('entry-velocity'),
+      angleSlider: document.getElementById('entry-angle'),
+      bcSlider: document.getElementById('ballistic-coefficient'),
+      shieldSlider: document.getElementById('shield-thickness'),
+      velocityValue: document.getElementById('vel-value'),
+      angleValue: document.getElementById('angle-value'),
+      bcValue: document.getElementById('bc-value'),
+      shieldValue: document.getElementById('shield-value'),
+      velDisplay: document.getElementById('vel-display'),
+      angleDisplay: document.getElementById('angle-display'),
+      // Readout elements
+      altValue: document.getElementById('alt-value'),
+      velValue: document.getElementById('vel-value'),
+      machValue: document.getElementById('mach-value'),
+      gammaValue: document.getElementById('gamma-value'),
+      heatValue: document.getElementById('heat-value'),
+      gValue: document.getElementById('g-value'),
+      shieldReadoutValue: document.getElementById('shield-value'),
+      tempValue: document.getElementById('temp-value'),
+      verdictValue: document.getElementById('verdict-value'),
+      timeValue: document.getElementById('time-value'),
+    };
+
+    elem.ctx = elem.canvas.getContext('2d');
+
+    // ============================================================
+    // INITIALIZATION
+    // ============================================================
+    function init() {
+      // Slider value displays
+      elem.velocitySlider.addEventListener('input', () => {
+        const val = elem.velocitySlider.valueAsNumber * 1000;
+        elem.velocityValue.textContent = (val / 1000).toFixed(1);
+        elem.velDisplay.textContent = val.toFixed(1);
+      });
+
+      elem.angleSlider.addEventListener('input', () => {
+        const val = parseFloat(elem.angleSlider.value);
+        elem.angleValue.textContent = val.toFixed(1);
+        elem.angleDisplay.textContent = val.toFixed(1);
+      });
+
+      elem.bcSlider.addEventListener('input', () => {
+        elem.bcValue.textContent = elem.bcSlider.value;
+      });
+
+      elem.shieldSlider.addEventListener('input', () => {
+        elem.shieldValue.textContent = parseFloat(elem.shieldSlider.value).toFixed(1);
+      });
+
+      // Launch button
+      elem.launchBtn.addEventListener('click', launchSimulation);
+
+      // Reset button
+      elem.resetBtn.addEventListener('click', resetSimulation);
+
+      // Pause button
+      elem.pauseBtn.addEventListener('click', togglePause);
+    }
+
+    // ============================================================
+    // PHYSICS FUNCTIONS
+    // ============================================================
+
+    // Exponential atmosphere: rho = rho0 * exp(-h/H)
+    function atmosphericDensity(h) {
+      if (h >= 0 && h <= 120000) {
+        return cfg.rho0 * Math.exp(-h / cfg.H);
+      }
+      return 0;
+    }
+
+    // Altitude-dependent gravity: g(h) = g0*(Re/(Re+h))^2
+    function gravityAtAltitude(h) {
+      return cfg.g0 * Math.pow(cfg.Re / (cfg.Re + h), 2);
+    }
+
+    // Newtonian drag acceleration: dv/dt = -rho*v^2/(2*beta)
+    // where beta = m/(Cd*A) is the ballistic coefficient
+    function dragAcceleration(rho, v, beta) {
+      return -rho * v * v / (2 * beta);
+    }
+
+    // Sutton-Graves convective heating: q = k*sqrt(rho/Rn)*v^3
+    function heatingFlux(rho, v) {
+      return cfg.kSutter * Math.sqrt(rho / cfg.noseRadius) * v * v * v;
+    }
+
+    // Dynamic pressure: q_dyn = 0.5*rho*v^2
+    function dynamicPressure(rho, v) {
+      return 0.5 * rho * v * v;
+    }
+
+    // ============================================================
+    // PHYSICS UPDATE (fixed timestep with substepping)
+    // ============================================================
+    const DT = 0.02;  // 20ms timestep = 50Hz
+
+    function updatePhysics(dt) {
+      const dtSec = dt;
+
+      // Get current atmospheric density and gravity
+      const rho = atmosphericDensity(state.h);
+      const g = gravityAtAltitude(state.h);
+
+      // If density is zero (above atmosphere), exit
+      if (rho <= 0) {
+        state.flying = false;
+        state.landed = true;
+        state.verdict = 'SKIPPED OFF ATMOSPHERE';
+        return;
+      }
+
+      // Drag acceleration
+      const dragAccel = dragAcceleration(rho, state.v, state.beta * state.dragMult);
+
+      // Total acceleration along trajectory
+      // dv/dt = drag_accel + g * sin(gamma)
+      const dv_dt = dragAccel + g * Math.sin(state.gamma);
+
+      // dgamma/dt = g * cos(gamma) / v  (ballistic, L=0)
+      const dgamma_dt = (state.v > 0) ? (g * Math.cos(state.gamma) / state.v) : 0;
+
+      // dh/dt = v * sin(gamma)
+      const dh_dt = state.v * Math.sin(state.gamma);
+
+      // dx/dt = v * cos(gamma)
+      const dx_dt = state.v * Math.cos(state.gamma);
+
+      // Update state using Euler integration
+      state.v += dv_dt * dtSec;
+      state.gamma += dgamma_dt * dtSec;
+      state.h += dh_dt * dtSec;
+      state.x += dx_dt * dtSec;
+      state.t += dtSec;
+
+      // --------------------------------------------------------
+      // HEAT SHIELD ABLATION AND RADIATIVE COOLING
+      // --------------------------------------------------------
+
+      // Heating flux
+      const q = heatingFlux(rho, state.v);
+
+      // Track maximum heat flux
+      if (q > state.maxHeat) {
+        state.maxHeat = q;
+      }
+
+      // Blackout check: ionization when surface temperature exceeds threshold
+      if (state.shieldTemp > cfg.blackoutTempK) {
+        state.blackout = true;
+      } else {
+        // Gradual fade - if temp drops below threshold, blackout ends
+        // but only after being above for some time
+        state.blackout = false;
+      }
+
+      // Ablation: shield thickness decreases due to heat flux above threshold
+      if (q > cfg.ablationThreshold) {
+        const ablationRate = cfg.ablationFactor * (q - cfg.ablationThreshold); // m/s
+        // Convert to mm per timestep
+        const ablation_mm = ablationRate * dtSec * 1000; // mm/s * s = mm
+        state.shieldThickness = Math.max(0, state.shieldThickness - ablation_mm);
+      }
+
+      // Radiative cooling: shield temperature relaxes when heating drops
+      // dT/dt = (q_in - q_out) / heat_capacity
+      // q_out = sigma * T^4 (Stefan-Boltzmann)
+      const heatCapacity = 3.0e4; // J/K - effective heat capacity
+      const radiativeCooling = q - cfg.sigmaSB * Math.pow(state.shieldTemp, 4);
+      state.shieldTemp += radiativeCooling / heatCapacity * dtSec;
+      // Keep temperature from going below absolute zero (mostly)
+      if (state.shieldTemp < 100) state.shieldTemp = 100;
+
+      // --------------------------------------------------------
+      // PARACHUTE DEPLOYMENT
+      // --------------------------------------------------------
+
+      const rhoForQ = atmosphericDensity(state.h);
+      const qDyn = dynamicPressure(rhoForQ, state.v);
+
+      // Drogue deployment: when altitude drops below drogue altitude
+      // AND dynamic pressure is within safe range
+      if (!state.parachutesDeployed) {
+        // Drogue deploy: altitude below threshold and q_dyn not too high
+        if (state.h < cfg.drogueAltitude && qDyn < cfg.drogueQdynMax) {
+          state.dragMult = 0.3;  // increase drag by ~3.3x (beta effectively reduced to 30%)
+          state.parachutesDeployed = { drogue: true };
+        }
+        // Main deploy: altitude below main threshold and q_dyn not too high
+        // Main only deploys if drogue has already deployed
+        else if (state.h < cfg.mainAltitude && qDyn < cfg.mainQdynMax &&
+                 state.parachutesDeployed.drogue) {
+          state.dragMult = 0.15;  // increase drag by ~6.7x
+          state.parachutesDeployed.main = true;
+        }
+      }
+
+      // --------------------------------------------------------
+      // PEAK G-LOAD TRACKING
+      // --------------------------------------------------------
+
+      // Total g-force: magnitude of acceleration / g0
+      const totalAccel = Math.abs(dragAccel) + Math.abs(g * Math.sin(state.gamma));
+      const gForce = totalAccel / cfg.g0;
+      if (gForce > state.peakG) {
+        state.peakG = gForce;
+      }
+
+      // --------------------------------------------------------
+      // VERDICT LOGIC
+      // --------------------------------------------------------
+      checkVerdict();
+    }
+
+    function checkVerdict() {
+      // 1. BURNED UP: shield thickness reached zero
+      if (state.shieldThickness <= 0 && state.flying) {
+        state.verdict = 'BURNED UP';
+        state.flying = false;
+        state.landed = true;
+        return;
+      }
+
+      // 2. SKIPPED OFF ATMOSPHERE: vehicle went back above 100km
+      // Check if altitude has been above 100km recently and velocity is still high
+      const recentlyAbove100 = state.history.some(entry => entry.h > 100000);
+      if (recentlyAbove100 && state.v > 1000 && state.t > 30) {
+        // Also check if the last few history points show altitude increasing
+        const last3 = state.history.slice(-3);
+        const altIncreasing = last3.every((entry, i) => i === 0 || entry.h > last3[i-1].h);
+        if (altIncreasing && state.v > 500) {
+          state.verdict = 'SKIPPED OFF ATMOSPHERE';
+          state.flying = false;
+          state.landed = true;
+          return;
+        }
+      }
+
+      // 3. CREW LOST TO G-LOAD
+      if (state.peakG >= cfg.gLimit && state.flying) {
+        state.verdict = 'CREW LOST TO G-LOAD';
+        state.flying = false;
+        state.landed = true;
+        return;
+      }
+
+      // 4. TOO STEEP: entry flight-path angle was extremely negative
+      const gammaDeg = state.gamma * 180 / Math.PI;
+      // If we started with very steep angle and haven't skipped/burned
+      if (gammaDeg < -11.5 && state.flying && state.t > 10) {
+        // Only a near-ballistic entry counts as "too steep": still high and fast late in the run
+        if (state.h > 50000 && state.v > 3000) {
+          state.verdict = 'TOO STEEP';
+          state.flying = false;
+          state.landed = true;
+          return;
+        }
+      }
+
+      // 5. SURVIVED: soft landing with parachutes
+      if (state.landed && !state.verdict) {
+        const finalHistory = state.history[state.history.length - 1];
+        if (finalHistory && state.v < cfg.terminalVel) {
+          state.verdict = 'SURVIVED';
+        } else if (state.v >= cfg.terminalVel && state.v < cfg.terminalVel * 3) {
+          // Hard but maybe survived
+          state.verdict = 'SURVIVED';
+        } else {
+          state.verdict = 'CREW LOST TO G-LOAD'; // impact too hard
+        }
+      }
+    }
+
+    // ============================================================
+    // LAUNCH / RESET
+    // ============================================================
+
+    function launchSimulation() {
+      // Initialize state from UI sliders
+      const entryVelKmS = parseFloat(elem.velocitySlider.value);
+      state.v = entryVelKmS * 1000;  // convert to m/s
+
+      const entryAngleDeg = parseFloat(elem.angleSlider.value);
+      state.gamma = entryAngleDeg * Math.PI / 180;  // convert to radians
+
+      state.beta = parseFloat(elem.bcSlider.value);
+      state.dragMult = 1;  // reset drag multiplier
+      state.shieldThickness = parseFloat(elem.shieldSlider.value);
+      state.shieldTemp = 300;  // room temperature
+
+      // Reset state
+      state.h = 120000;       // start at 120km
+      state.x = 0;
+      state.t = 0;
+      state.history = [];
+      state.flying = true;
+      state.paused = false;
+      state.landed = false;
+      state.verdict = null;
+      state.blackout = false;
+      state.peakG = 0;
+      state.maxHeat = 0;
+
+      state.parachutesDeployed = false;
+
+      // Launch button text
+      if (elem.launchBtn.textContent === 'Restart') {
+        resetSimulation();
+      }
+    }
+
+    function resetSimulation() {
+      // Full reset
+      state.h = 120000;
+      state.v = parseFloat(elem.velocitySlider.value) * 1000;
+      state.gamma = parseFloat(elem.angleSlider.value) * Math.PI / 180;
+      state.beta = parseFloat(elem.bcSlider.value);
+      state.shieldThickness = parseFloat(elem.shieldSlider.value);
+      state.shieldTemp = 300;
+      state.x = 0;
+      state.t = 0;
+      state.history = [];
+      state.flying = false;
+      state.paused = true;
+      state.landed = false;
+      state.verdict = null;
+      state.blackout = false;
+      state.peakG = 0;
+      state.maxHeat = 0;
+      state.parachutesDeployed = false;
+      state.dragMult = 1;
+
+      elem.launchBtn.textContent = 'Launch';
+    }
+
+    function togglePause() {
+      state.paused = !state.paused;
+      elem.pauseBtn.textContent = state.paused ? 'Resume' : 'Pause';
+    }
+
+    // ============================================================
+    // PROJECTION HELPERS
+    // ============================================================
+
+    // Project downrange x to canvas X position
+    // Capsule starts on right, moves left as x increases
+    function projectX(x) {
+      // Scale: maxVisibleDownrange px spread starting from right edge
+      const startX = cfg.earthCenterX + 80;  // start 80px right of Earth center
+      const scale = startX / cfg.maxVisibleDownrange;  // px per meter
+      return startX - x * scale;  // move left as x increases
+    }
+
+    // Project altitude h to canvas Y position
+    // h=120000 → y≈90 (top), h=0 → y≈630 (Earth surface)
+    function projectAltitude(h) {
+      // Map: h=120000 → y=90, h=0 → y=630
+      const cyMin = 90;    // altitude 120km maps to
+      const cyMax = 630;   // altitude 0km maps to (Earth surface)
+      return cyMax - h * (cyMax - cyMin) / 120000;
+    }
+
+    // ============================================================
+    // RENDERING
+    // ============================================================
+
+    function render() {
+      const ctx = elem.ctx;
+      const cw = elem.canvas.width;
+      const ch = elem.canvas.height;
+
+      // --------------------------------------------------------
+      // CLEAR CANVAS
+      // --------------------------------------------------------
+      ctx.fillStyle = '#050512';
+      ctx.fillRect(0, 0, cw, ch);
+
+      // --------------------------------------------------------
+      // DRAW EARTH
+      // --------------------------------------------------------
+      drawEarth();
+
+      // --------------------------------------------------------
+      // DRAW ATMOSPHERIC GLOW
+      // --------------------------------------------------------
+      drawAtmosphereGlow();
+
+      // --------------------------------------------------------
+      // DRAW TRAJECTORY PATH
+      // --------------------------------------------------------
+      drawTrajectory();
+
+      // --------------------------------------------------------
+      // DRAW CAPSULE AND PLASMA TRAIL
+      // --------------------------------------------------------
+      drawPlasmaTrail();
+      drawCapsule();
+
+      // --------------------------------------------------------
+      // DRAW HUD READOUTS
+      // --------------------------------------------------------
+      drawHUD();
+
+      // --------------------------------------------------------
+      // CANVAS OVERLAYS (blackout banner + verdict banner)
+      // --------------------------------------------------------
+      drawOverlays();
+    }
+
+    function drawOverlays() {
+      const ctx = elem.ctx;
+      const cw = elem.canvas.width;
+
+      // COMMS BLACKOUT banner — pulsing while the plasma sheath ionizes
+      if (state.blackout && state.flying) {
+        const pulse = 0.55 + 0.45 * Math.sin(state.t * 8);
+        ctx.save();
+        ctx.font = 'bold 26px Consolas, Monaco, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = `rgba(255, 215, 0, ${pulse.toFixed(3)})`;
+        ctx.shadowColor = 'rgba(255, 140, 0, 0.9)';
+        ctx.shadowBlur = 24;
+        ctx.fillText('⚠  COMMS BLACKOUT  ⚠', cw / 2, 60);
+        ctx.font = '13px Consolas, Monaco, monospace';
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(255, 180, 90, 0.75)';
+        ctx.fillText('plasma sheath ionized — telemetry lost', cw / 2, 84);
+        ctx.restore();
+      }
+
+      // Verdict banner at end of run
+      if (state.verdict) {
+        const color =
+          state.verdict === 'SURVIVED' ? '#00d4aa' :
+          state.verdict === 'BURNED UP' ? '#ff4757' :
+          state.verdict === 'SKIPPED OFF ATMOSPHERE' ? '#ffa000' : '#ffb300';
+        ctx.save();
+        ctx.font = 'bold 40px Consolas, Monaco, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 30;
+        ctx.fillText(state.verdict, cw / 2, 130);
+        ctx.restore();
+      }
+    }
+
+    function drawEarth() {
+      const ctx = elem.ctx;
+      const ecx = cfg.earthCenterX;
+      const ecy = cfg.earthCenterY;
+      const er = cfg.earthRadius;
+
+      // Earth gradient fill
+      const earthGrad = ctx.createRadialGradient(ecx, ecy, 0, ecx, ecy, er);
+      earthGrad.addColorStop(0, '#0a0a20');
+      earthGrad.addColorStop(0.5, '#1a1a3a');
+      earthGrad.addColorStop(1, '#050512');
+      ctx.fillStyle = earthGrad;
+      ctx.beginPath();
+      ctx.arc(ecx, ecy, er, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Earth surface ring
+      ctx.strokeStyle = '#1a1a30';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(ecx, ecy, er - 8, 0, Math.PI);
+      ctx.stroke();
+    }
+
+    function drawAtmosphereGlow() {
+      const ctx = elem.ctx;
+      const ecx = cfg.earthCenterX;
+      const ecy = cfg.earthCenterY;
+      const er = cfg.earthRadius;
+
+      // Upper atmosphere glow - a sector from the Earth's terminator
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(ecx, ecy, er + 40, 0, Math.PI * 2);
+      ctx.clip();
+
+      // Gradient overlay for atmospheric emission
+      const atmosGrad = ctx.createRadialGradient(ecx, ecy, er, ecx, ecy, er + 60);
+      atmosGrad.addColorStop(0, `rgba(255, 150, 0, 0.08)`);
+      atmosGrad.addColorStop(0.5, `rgba(255, 100, 0, 0.03)`);
+      atmosGrad.addColorStop(1, `rgba(255, 50, 0, 0)`);
+
+      ctx.fillStyle = atmosGrad;
+      ctx.beginPath();
+      ctx.arc(ecx, ecy, er + 60, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawTrajectory() {
+      const ctx = elem.ctx;
+      if (state.history.length < 2) return;
+
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#00d4aa';
+      ctx.globalAlpha = 0.8;
+
+      // Start from first point
+      const first = state.history[0];
+      ctx.beginPath();
+      ctx.moveTo(projectX(first.x), projectAltitude(first.h));
+
+      // Draw rest of points
+      for (let i = 1; i < state.history.length; i++) {
+        const point = state.history[i];
+        ctx.lineTo(projectX(point.x), projectAltitude(point.h));
+      }
+
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    // Capsule shape: simple blunt-nose vehicle
+    function drawCapsule() {
+      const ctx = elem.ctx;
+      const cx = projectX(state.x);
+      const cy = projectAltitude(state.h);
+
+      // Don't draw if altitude is above the visible area
+      if (cy < 50 || cy > 700) return;
+
+      // Capsule orientation: velocity direction = gamma angle
+      // For canvas Y-down, we need to adjust
+      const angle = state.gamma;  // already in radians, negative for entry
+
+      // Capsule shape in local coords (nose forward)
+      // A simple polygon representing a re-entry capsule
+      const noseLength = 30;
+      const baseWidth = 19;
+
+      // Shape points relative to capsule center, nose pointing in direction angle
+      const shape = [
+        // Nose point
+        { x: 0, y: noseLength },
+        // Bottom-right base
+        { x: baseWidth, y: baseWidth / 2 },
+        // Bottom-left base
+        { x: -baseWidth, y: baseWidth / 2 },
+        // Top-left indent
+        { x: -baseWidth * 0.4, y: -baseWidth / 3 },
+        // Top-right indent
+        { x: baseWidth * 0.4, y: -baseWidth / 3 },
+      ];
+
+      // Rotate and transform points
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+
+      // Transform each point: rotate then translate to canvas position
+      const transformed = shape.map(p => {
+        // Rotate around origin
+        const rx = p.x * cosA - p.y * sinA;
+        const ry = p.x * sinA + p.y * cosA;
+        // Translate to canvas position (use nose as reference)
+        return { x: cx + rx, y: cy - ry };  // inverted Y for canvas
+      });
+
+      // Determine heat-based coloring
+      const rho = atmosphericDensity(state.h);
+      const q = heatingFlux(rho, state.v);
+      const heatIntensity = Math.min(1, q / 150000);
+
+      let fillColor;
+      if (state.blackout) {
+        // Orange-white hot during blackout
+        const heatClamped = Math.min(1, q / 200000);
+        fillColor = `rgba(255, ${Math.round(200 + heatClamped * 55)}, 60, 0.95)`;
+      } else {
+        // Blue-white based on heat flux
+        fillColor = `rgba(120, ${Math.round(160 + heatIntensity * 80)}, 255, 0.9)`;
+      }
+
+      // Glow around the capsule, intensifying with heat
+      ctx.save();
+      ctx.shadowColor = state.blackout ? 'rgba(255,140,0,0.95)' : 'rgba(120,180,255,0.8)';
+      ctx.shadowBlur = 18 + heatIntensity * 34;
+      ctx.fillStyle = fillColor;
+      ctx.strokeStyle = state.blackout ? '#ffe680' : '#9ec3ff';
+      ctx.lineWidth = 2;
+
+      // Draw the capsule shape
+      ctx.beginPath();
+      ctx.moveTo(transformed[0].x, transformed[0].y);  // nose
+      ctx.lineTo(transformed[1].x, transformed[1].y);  // bottom-right
+      ctx.lineTo(transformed[4].x, transformed[4].y);  // top-right indent
+      ctx.lineTo(transformed[3].x, transformed[3].y);  // top-left indent
+      ctx.lineTo(transformed[2].x, transformed[2].y);  // bottom-left
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      // Draw capsule center mark
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Fiery plasma trail — streams behind the capsule whenever it's heating,
+    // most intense during the ionization blackout.
+    function drawPlasmaTrail() {
+      const ctx = elem.ctx;
+      const cx = projectX(state.x);
+      const cy = projectAltitude(state.h);
+
+      const rho = atmosphericDensity(state.h);
+      const q = heatingFlux(rho, state.v);
+      const intensity = Math.min(1, q / 200000);   // 0..1 over the heat pulse
+      if (intensity < 0.02) return;
+
+      // Trail streams "up-range" — opposite the velocity direction.
+      // velocity heads into the atmosphere at angle gamma (negative); the wake
+      // trails the other way. Canvas Y is inverted.
+      const dirX = -Math.cos(state.gamma);
+      const dirY =  Math.sin(state.gamma);
+      const trailLen = 60 + intensity * 170;        // px, grows with heat
+      const nParticles = 42;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';     // additive → fire glow
+      for (let i = 0; i < nParticles; i++) {
+        const p = i / (nParticles - 1);             // 0 at capsule → 1 at tail
+        const jitter = (Math.sin(i * 12.9898 + state.t * 9.0) * 0.5) * (2 + intensity * 6);
+        const perpX = -dirY, perpY = dirX;          // perpendicular for spread
+        const spread = jitter * (0.3 + p);
+        const d = p * trailLen;
+        const tx = cx + dirX * d + perpX * spread;
+        const ty = cy + dirY * d + perpY * spread;
+
+        // color: white-hot at the capsule → orange → deep red → smoke
+        let r, g, b;
+        if (p < 0.25)      { r = 255; g = 255; b = 210; }       // white-hot core
+        else if (p < 0.55) { r = 255; g = Math.round(200 - (p - 0.25) * 300); b = 40; } // orange
+        else               { r = Math.round(230 - (p - 0.55) * 200); g = 40; b = 30; }  // red→smoke
+        const alpha = (1 - p) * (0.35 + intensity * 0.55);
+        const size = (1.5 + intensity * 5) * (1 - p * 0.55);
+
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
+        ctx.shadowColor = `rgba(255, 120, 20, ${(alpha * 0.9).toFixed(3)})`;
+        ctx.shadowBlur = 10 + intensity * 20;
+        ctx.beginPath();
+        ctx.arc(tx, ty, Math.max(0.6, size), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // ============================================================
+    // HUD READOUTS
+    // ============================================================
+
+    function drawHUD() {
+      const rho = atmosphericDensity(state.h);
+      const q = heatingFlux(rho, state.v);
+
+      // Altitude in km
+      const altKm = state.h / 1000;
+      elem.altValue.textContent = altKm.toFixed(1);
+
+      // Velocity in km/s
+      const velKmS = state.v / 1000;
+      elem.velValue.textContent = velKmS.toFixed(2);
+
+      // Mach number (approx: speed of sound ~295 m/s at high altitude)
+      const speedOfSound = 295;
+      const mach = state.v / speedOfSound;
+      elem.machValue.textContent = mach.toFixed(1);
+
+      // Flight path angle in degrees
+      const gammaDeg = state.gamma * 180 / Math.PI;
+      elem.gammaValue.textContent = gammaDeg.toFixed(1);
+
+      // Heat flux in W/m^2
+      elem.heatValue.textContent = q.toFixed(0);
+
+      // g-force
+      const dragAccel = rho * state.v * state.v / (2 * state.beta * state.dragMult);
+      const totalAccel = Math.abs(dragAccel) + Math.abs(cfg.g0 * Math.sin(state.gamma));
+      const gForce = totalAccel / cfg.g0;
+      elem.gValue.textContent = gForce.toFixed(1);
+
+      // Shield remaining in mm
+      elem.shieldReadoutValue.textContent = state.shieldThickness.toFixed(1);
+
+      // Surface temperature in K
+      elem.tempValue.textContent = state.shieldTemp.toFixed(0);
+
+      // Verdict
+      if (state.verdict) {
+        elem.verdictValue.textContent = state.verdict;
+        elem.verdictValue.style.color =
+          state.verdict === 'SURVIVED' ? 'var(--accent)' :
+          state.verdict === 'BURNED UP' ? 'var(--danger)' :
+          state.verdict === 'SKIPPED OFF ATMOSPHERE' ? 'orange' :
+          '#ffb300';
+      } else {
+        elem.verdictValue.textContent = '--';
+      }
+
+      // Simulation time
+      elem.timeValue.textContent = state.t.toFixed(1);
+    }
+
+    // ============================================================
+    // MAIN ANIMATION LOOP
+    // ============================================================
+    let lastFrame = 0;
+    let accumulator = 0;
+
+    function animationLoop(time) {
+      requestAnimationFrame(animationLoop);
+
+      const delta = time - lastFrame;
+      lastFrame = time;
+      accumulator += delta / 1000;  // convert ms to seconds
+
+      // Fixed timestep updates with substepping
+      while (accumulator >= DT) {
+        if (state.flying && !state.paused && !state.landed) {
+          updatePhysics(DT);
+        }
+        accumulator -= DT;
+
+        // Max substeps per frame to prevent runaway
+        if (state.history.length > 1000) break;
+      }
+
+      // Render (plasma trail is drawn inside render, before the capsule)
+      render();
+    }
+
+    // Start the loop
+    lastFrame = performance.now();
+    requestAnimationFrame(animationLoop);
+
+    // ============================================================
+    // INITIALIZE
+    // ============================================================
+    init();
+    resetSimulation();
+  </script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Built by the stack — hypersonic re-entry, coded by Qwen3.8 on a DGX Spark</title>
+<meta name="description" content="A physically-real atmospheric re-entry simulator, written by Qwen3.8-27B (NVFP4) under Nemotron-3.5 orchestration on a single DGX Spark — with a live correction loop.">
+<style>
+  :root{
+    --bg:#07090d; --bg2:#0b0f16; --card:#10161f; --card2:#141c27;
+    --ink:#eaf1f8; --sub:#8fa2b5; --dim:#5c6b7c;
+    --nv:#76b900; --nv2:#a4e34d; --qw:#8b6dff; --qw2:#b39dff; --amber:#ffb347;
+    --line:rgba(140,160,185,.14); --r:18px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;overflow-x:hidden}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;
+    background:rgba(140,160,185,.1);padding:.12em .4em;border-radius:6px}
+  a{color:var(--qw2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 22px}
+  .hero{position:relative;padding:76px 0 40px;text-align:center;
+    background:radial-gradient(1200px 500px at 50% -10%,rgba(139,109,255,.16),transparent 60%),
+               radial-gradient(900px 420px at 50% 0%,rgba(118,185,0,.10),transparent 55%)}
+  .kicker{display:inline-block;font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--nv2);border:1px solid var(--line);border-radius:999px;padding:6px 14px;margin-bottom:22px}
+  h1{font-size:clamp(30px,5vw,52px);line-height:1.08;letter-spacing:-.02em;font-weight:800}
+  h1 .g{background:linear-gradient(100deg,var(--nv2),var(--qw2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{max-width:680px;margin:22px auto 0;color:var(--sub);font-size:18px}
+  .badges{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:26px}
+  .badge{font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);
+    border-radius:999px;padding:7px 14px}
+  .badge b{color:var(--nv2)}
+  section{padding:44px 0}
+  h2{font-size:26px;letter-spacing:-.01em;margin-bottom:8px}
+  h2 .n{color:var(--qw2);font-variant-numeric:tabular-nums}
+  .sub{color:var(--sub);margin-bottom:22px}
+  .frame{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:#000;
+    box-shadow:0 30px 80px -40px rgba(0,0,0,.9)}
+  .frame iframe{width:100%;height:760px;border:0;display:block;background:#050512}
+  .frame video{width:100%;display:block}
+  .hint{color:var(--dim);font-size:13px;margin-top:10px;text-align:center}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:8px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .stat .v{font-size:26px;font-weight:800;color:var(--nv2);font-variant-numeric:tabular-nums}
+  .stat .k{font-size:12.5px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+  .steps{display:grid;gap:14px;margin-top:8px}
+  .step{display:grid;grid-template-columns:44px 1fr;gap:16px;align-items:start;
+    background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+  .step .num{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-weight:800;
+    background:linear-gradient(135deg,rgba(118,185,0,.2),rgba(139,109,255,.2));color:var(--ink);border:1px solid var(--line)}
+  .step h3{font-size:16px;margin-bottom:3px}
+  .step p{color:var(--sub);font-size:14.5px}
+  .tag{color:var(--qw2)}.tag.nv{color:var(--nv2)}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px;justify-content:center}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:12px;font-weight:700;font-size:15px}
+  .btn.p{background:linear-gradient(100deg,var(--nv),var(--qw));color:#fff}
+  .btn.s{background:var(--card);border:1px solid var(--line);color:var(--ink)}
+  footer{padding:50px 0;color:var(--dim);font-size:13.5px;text-align:center;border-top:1px solid var(--line)}
+  .note{background:var(--card2);border:1px solid var(--line);border-left:3px solid var(--amber);
+    border-radius:10px;padding:14px 18px;color:var(--sub);font-size:14.5px;margin-top:18px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="kicker">sparky · built by the stack</span>
+    <h1>A hypersonic re-entry, <span class="g">written by the coder model itself</span></h1>
+    <p class="lede">A physically-real atmospheric re-entry simulator — Sutton-Graves heating, ablative shield burn-through,
+      plasma comms-blackout, peak-g limits, atmospheric skip. Not hand-written: <b>Qwen3.8-27B (NVFP4)</b> coded it under
+      <b>Nemotron-3.5-Lightning</b> orchestration, both co-resident on one <b>DGX Spark</b> — through a live correction loop.</p>
+    <div class="badges">
+      <span class="badge"><b>1×</b> DGX Spark · GB10 · 121 GB UMA</span>
+      <span class="badge">orchestrator <b>→</b> coder delegation</span>
+      <span class="badge">single-file HTML · <b>zero</b> deps</span>
+    </div>
+    <div class="cta">
+      <a class="btn p" href="demo/reentry.html">▶ Launch the live simulator</a>
+      <a class="btn s" href="index.html">← All recipes</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>The 30-second run</h2>
+    <p class="sub">Entry at 11 km/s, −6.5°. It survived the fire, then came in a hair too shallow and skipped back off the atmosphere.</p>
+    <div class="frame">
+      <video src="demo/reentry_dgxspark.mp4" autoplay muted loop playsinline poster="demo/reentry_hero_blackout.png"></video>
+    </div>
+    <div class="grid" style="margin-top:16px">
+      <div class="stat"><div class="v">295</div><div class="k">peak heat W/cm²</div></div>
+      <div class="stat"><div class="v">2618 K</div><div class="k">shield surface</div></div>
+      <div class="stat"><div class="v">11.5 g</div><div class="k">peak deceleration</div></div>
+      <div class="stat"><div class="v">Mach 37</div><div class="k">entry velocity</div></div>
+      <div class="stat"><div class="v">3.8 mm</div><div class="k">shield remaining</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Play with the physics</h2>
+    <p class="sub">Live below. Drag velocity, entry angle, ballistic coefficient and shield thickness, then Launch. Every number is simulated.</p>
+    <div class="frame"><iframe src="demo/reentry.html" title="Re-entry simulator" loading="lazy"></iframe></div>
+    <p class="hint">Runs entirely in your browser — the same single HTML file the model wrote. <a href="demo/reentry.html">Open full-screen ↗</a></p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>How it was actually built</h2>
+    <p class="sub">The point isn't the sim — it's that the <span class="tag nv">orchestrator</span> handed the whole job to the <span class="tag">coder</span>, and we corrected the coder like a teammate.</p>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><div>
+        <h3>Delegate, don't prompt</h3>
+        <p>The task went to the Hermes agent whose main model is <span class="tag nv">Nemotron-3.5-Lightning</span> (:8001).
+        Nemotron decomposed it and delegated the code to the <span class="tag">Qwen3.8-27B</span> coder (:8000) — two NVFP4 models co-located on one GB10.</p>
+      </div></div>
+      <div class="step"><div class="num">2</div><div>
+        <h3>First draft, real bugs</h3>
+        <p>The coder emitted a 32 KB single-file sim — with a missing control-panel and an un-interpolated <code>rgba()</code> template. It ran frozen.</p>
+      </div></div>
+      <div class="step"><div class="num">3</div><div>
+        <h3>Correct it like a teammate</h3>
+        <p>We fed a precise correction back through the orchestrator; the coder edited the file in place and fixed both. Then we calibrated the physics
+        (ablation rate, surface heat capacity so the shell reaches ionization, the re-entry-corridor verdicts) against a headless-browser harness that measured each run.</p>
+      </div></div>
+      <div class="step"><div class="num">4</div><div>
+        <h3>Verified on the metal</h3>
+        <p>Throughput read straight off vLLM's Prometheus <code>/metrics</code> on the Spark — dense-27B decode held its measured baseline while the orchestrator fronted the conversation.</p>
+      </div></div>
+    </div>
+    <div class="note">Honest footnote: it took two correction rounds and a physics calibration pass — the first draft looked plausible but was mis-scaled.
+      That loop <em>is</em> the workflow this repo is about.</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Part of <a href="index.html">github.com/hsrakri/sparky</a> — deployment recipes for co-locating open models on the DGX Spark.<br>
+    Recipe 01: Nemotron + Qwen co-location · Recipe 02: Qwen3.8-27B dense optimization · this: <b>built-by-the-stack</b> demo.
+  </div>
+</footer>
+
+</body>
+</html>
