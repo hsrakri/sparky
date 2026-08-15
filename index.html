@@ -243,6 +243,17 @@
   <a href="demo.html">Live demo ↗</a>
 </nav>
 
+<!-- ================= CHANGE BANNER ================= -->
+<div style="max-width:1180px;margin:64px auto 0;padding:0 22px">
+  <div style="background:linear-gradient(100deg,rgba(118,185,0,.12),rgba(139,109,255,.12));border:1px solid var(--line);border-left:3px solid var(--nv);border-radius:14px;padding:16px 20px;font-size:14.5px;line-height:1.55">
+    <b style="color:var(--nv2);letter-spacing:.04em">▲ UPDATE · 2026‑08‑14 · the stack got ~2× faster on both ends</b><br>
+    <b>Orchestrator swapped Nemotron‑3.5 → Qwen3.6‑35B‑A3B (MoE + MTP).</b> Head‑to‑head on this box, Qwen3.6 ran the delegation turn at
+    <b>105.6 tok/s vs 51.7</b> and cut turn latency <b>6.85 s → 2.72 s (2.5×)</b> with clean tool‑calls — so it's now the harness.
+    And the <b>Qwen3.8‑27B coder gained its built‑in MTP head</b>: <b>11.6 → 30.4 tok/s (2.6×)</b>, tool‑calls intact, on our own v0.26 image (no third‑party build).
+    <span style="color:var(--sub)">Details in <a href="recipes/qwen38-27b-dense-optimization.md">Recipe 02</a>. Nemotron kept cached for rollback. Hat‑tip <a href="https://github.com/drowzeys/keys-vLLm.0.27-Qwen3.8-NVFP4-MTP3-Single-DGX-Spark">@drowzeys</a> & @eugr for the MTP‑on‑Spark lead.</span>
+  </div>
+</div>
+
 <!-- ================= HERO ================= -->
 <header class="hero">
   <div class="grid-bg"></div>
@@ -268,10 +279,10 @@
 
   <div class="arch reveal">
     <div class="node nv">
-      <div class="role">Orchestrator · :8001</div>
-      <h3>Nemotron‑3.5‑Lightning 30B</h3>
-      <div class="spec">hybrid Mamba‑MoE · A3B · NVFP4 · util 0.42</div>
-      <div class="chips"><span class="chip">~50 tok/s</span><span class="chip">131K ctx</span><span class="chip">reasoning</span><span class="chip">enforce‑eager</span></div>
+      <div class="role">Orchestrator · :8002</div>
+      <h3>Qwen3.6‑35B‑A3B</h3>
+      <div class="spec">MoE · 3B active · NVFP4 · MTP · util 0.42</div>
+      <div class="chips"><span class="chip">105.6 tok/s</span><span class="chip">131K ctx</span><span class="chip">2.72 s / turn</span><span class="chip">clean tools</span></div>
     </div>
     <div class="link-col">
       <span class="flow-label">delegates</span>
