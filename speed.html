@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2× on both ends — tuning a two-model agent on one DGX Spark</title>
+<meta name="description" content="How a home-lab DGX Spark (GB10, 128GB) got ~2× faster on both the orchestrator and the coder — MTP speculative decoding, a MoE orchestrator swap, a thinking split, and a draft→critique loop. Every number measured on the box.">
+<meta property="og:title" content="2× on both ends — a two-model agent on one DGX Spark">
+<meta property="og:description" content="MTP decoding, a MoE orchestrator swap, a thinking split, and a fast-draft→strong-critique loop. All measured on one GB10.">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root{
+    --bg:#06080c; --bg2:#0a0e15; --card:#0f1520; --card2:#131b28;
+    --ink:#eef4fb; --sub:#93a4b7; --dim:#5a6b7e;
+    --nv:#76b900; --nv2:#a4e34d; --qw:#8b6dff; --qw2:#b39dff; --amber:#ffb347; --hot:#ff6b6b;
+    --line:rgba(150,170,195,.13); --r:20px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);overflow-x:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em;
+    background:rgba(150,170,195,.1);padding:.1em .42em;border-radius:6px;color:var(--qw2)}
+  a{color:var(--qw2);text-decoration:none} a:hover{text-decoration:underline}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  section{padding:60px 0;position:relative}
+
+  /* ---------- HERO ---------- */
+  .hero{min-height:88vh;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden;text-align:center;padding:80px 0 50px}
+  .orb{position:absolute;border-radius:50%;filter:blur(20px);opacity:.5;z-index:0}
+  .orb.a{width:44vmax;height:44vmax;background:radial-gradient(circle,rgba(118,185,0,.28),transparent 62%);top:-20vmax;right:-14vmax;animation:drift 24s ease-in-out infinite alternate}
+  .orb.b{width:40vmax;height:40vmax;background:radial-gradient(circle,rgba(139,109,255,.30),transparent 62%);bottom:-18vmax;left:-12vmax;animation:drift2 30s ease-in-out infinite alternate}
+  @keyframes drift{to{transform:translate(-8vmax,6vmax) scale(1.12)}}
+  @keyframes drift2{to{transform:translate(7vmax,-5vmax) scale(1.1)}}
+  .hero .wrap{position:relative;z-index:1}
+  .kick{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--nv2);border:1px solid var(--line);border-radius:999px;padding:8px 16px;margin-bottom:30px;background:rgba(15,21,32,.5)}
+  .pdot{width:8px;height:8px;border-radius:50%;background:var(--nv);box-shadow:0 0 12px var(--nv);animation:pulse 2s infinite}
+  @keyframes pulse{50%{opacity:.4}}
+  h1{font-size:clamp(38px,7vw,78px);line-height:1.02;letter-spacing:-.03em;font-weight:850}
+  .g1{background:linear-gradient(105deg,var(--nv2) 10%,var(--qw2) 90%);-webkit-background-clip:text;background-clip:text;color:transparent;
+    background-size:200% auto;animation:sheen 6s linear infinite}
+  @keyframes sheen{to{background-position:200% center}}
+  .lede{max-width:640px;margin:26px auto 0;color:var(--sub);font-size:19px}
+  .heros{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:38px}
+  .hs{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 24px;min-width:150px}
+  .hs .v{font-size:34px;font-weight:850;line-height:1;font-variant-numeric:tabular-nums}
+  .hs .v.nv{color:var(--nv2)} .hs .v.qw{color:var(--qw2)}
+  .hs .k{font-size:12.5px;color:var(--sub);margin-top:8px;text-transform:uppercase;letter-spacing:.05em}
+  .scroll{margin-top:46px;color:var(--dim);font-size:26px;animation:bob 1.8s ease-in-out infinite}
+  @keyframes bob{50%{transform:translateY(9px)}}
+
+  /* ---------- shared ---------- */
+  .eyebrow{font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--qw2);margin-bottom:12px;font-weight:700}
+  .eyebrow.nv{color:var(--nv2)}
+  h2{font-size:clamp(27px,4vw,40px);letter-spacing:-.02em;line-height:1.1;font-weight:800}
+  .lead{color:var(--sub);font-size:17px;max-width:680px;margin-top:14px}
+  .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+  .d1{transition-delay:.08s}.d2{transition-delay:.16s}.d3{transition-delay:.24s}
+
+  /* ---------- MOVES ---------- */
+  .moves{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:34px}
+  .move{background:linear-gradient(160deg,var(--card),var(--bg2));border:1px solid var(--line);border-radius:var(--r);padding:26px;position:relative;overflow:hidden}
+  .move::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--edge,var(--nv))}
+  .move.qw{--edge:linear-gradient(90deg,var(--qw),var(--qw2))}
+  .move.nv{--edge:linear-gradient(90deg,var(--nv),var(--nv2))}
+  .move .no{font-size:13px;color:var(--dim);font-weight:700;letter-spacing:.1em}
+  .move h3{font-size:20px;margin:8px 0 6px;letter-spacing:-.01em}
+  .move p{color:var(--sub);font-size:14.5px}
+  .ba{display:flex;align-items:baseline;gap:12px;margin-top:16px;flex-wrap:wrap}
+  .ba .from{color:var(--dim);font-size:20px;text-decoration:line-through;text-decoration-color:rgba(150,170,195,.35)}
+  .ba .arrow{color:var(--dim)}
+  .ba .to{font-size:30px;font-weight:850;font-variant-numeric:tabular-nums}
+  .ba .to.nv{color:var(--nv2)}.ba .to.qw{color:var(--qw2)}
+  .ba .mult{margin-left:auto;font-size:13px;font-weight:800;padding:5px 11px;border-radius:999px;background:rgba(118,185,0,.14);color:var(--nv2);border:1px solid rgba(118,185,0,.25)}
+  .ba .mult.qw{background:rgba(139,109,255,.14);color:var(--qw2);border-color:rgba(139,109,255,.25)}
+
+  /* ---------- SPEED BARS ---------- */
+  .chart{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:30px;margin-top:30px}
+  .chart h4{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:22px}
+  .bar{display:grid;grid-template-columns:190px 1fr 92px;gap:14px;align-items:center;margin-bottom:16px}
+  .bar .lab{font-size:14px;font-weight:600;text-align:right}
+  .bar .lab small{display:block;color:var(--dim);font-weight:500;font-size:11.5px}
+  .bar .track{height:28px;background:rgba(150,170,195,.07);border-radius:9px;overflow:hidden;border:1px solid var(--line)}
+  .bar .fill{height:100%;width:0;border-radius:9px;transition:width 1.4s cubic-bezier(.2,.7,.15,1)}
+  .in .f1{width:100%}.in .f2{width:46.4%}.in .f3{width:26.7%}.in .f4{width:10.2%}
+  .fq36{background:linear-gradient(90deg,#5a48b8,var(--qw))}
+  .fnemo{background:linear-gradient(90deg,#4a7a08,var(--nv))}
+  .fq38m{background:linear-gradient(90deg,var(--nv),var(--nv2))}
+  .fq38b{background:linear-gradient(90deg,#6b6b7a,#9aa0b0)}
+  .bar .val{font-family:ui-monospace,monospace;font-weight:850;font-size:15px;text-align:right;font-variant-numeric:tabular-nums}
+
+  /* ---------- DGX SETTINGS ---------- */
+  .hwstrip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:30px}
+  .hw{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .hw .v{font-size:22px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+  .hw .k{font-size:11.5px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-top:5px}
+  .cfgs{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px}
+  .cfg{background:#080b10;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .cfg .top{display:flex;align-items:center;gap:9px;padding:13px 18px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,rgba(139,109,255,.08),transparent)}
+  .cfg.nvtop .top{background:linear-gradient(90deg,rgba(118,185,0,.08),transparent)}
+  .cfg .top .role{font-size:12px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
+  .cfg .top .role b{color:var(--qw2)} .cfg.nvtop .top .role b{color:var(--nv2)}
+  .dots{display:flex;gap:6px}.dots i{width:11px;height:11px;border-radius:50%;display:block}
+  .dots i:nth-child(1){background:#ff5f57}.dots i:nth-child(2){background:#febc2e}.dots i:nth-child(3){background:#28c840}
+  .cfg pre{padding:18px;font-family:ui-monospace,monospace;font-size:12px;line-height:1.75;color:#c8d4e2;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+  .cfg pre .fl{color:var(--qw2)}.cfg pre .vl{color:var(--nv2)}.cfg pre .cm{color:var(--dim)}
+  .rules{margin-top:22px;background:var(--card2);border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:12px;padding:18px 22px}
+  .rules b{color:var(--amber)} .rules ul{margin:10px 0 0 18px;color:var(--sub);font-size:14px} .rules li{margin:5px 0}
+
+  /* ---------- DIAGRAM ---------- */
+  .diagram{margin-top:30px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:34px 26px}
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;justify-content:center}
+  .gb10{border:1.5px dashed rgba(118,185,0,.4);border-radius:18px;padding:20px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;justify-content:center;position:relative;background:radial-gradient(120% 120% at 50% 0%,rgba(118,185,0,.05),transparent)}
+  .gb10 .tag{position:absolute;top:-11px;left:22px;background:var(--bg);padding:0 10px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--nv2)}
+  .mnode{background:linear-gradient(160deg,var(--card2),var(--bg2));border:1px solid var(--line);border-radius:16px;padding:20px;min-width:230px;position:relative}
+  .mnode.orch{box-shadow:0 0 0 1px rgba(139,109,255,.3),0 20px 50px -30px rgba(139,109,255,.5)}
+  .mnode.coder{box-shadow:0 0 0 1px rgba(118,185,0,.3),0 20px 50px -30px rgba(118,185,0,.5)}
+  .mnode .r{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim)}
+  .mnode .r b{color:var(--qw2)} .mnode.coder .r b{color:var(--nv2)}
+  .mnode h4{font-size:17px;margin:6px 0 4px}
+  .mnode .sp{font-size:12.5px;color:var(--sub)} .mnode .mono.small{font-size:11.5px;color:var(--dim);margin-top:8px}
+  .between{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:0 8px;min-width:120px}
+  .between .l{font-size:11px;color:var(--qw2);letter-spacing:.05em}
+  .between .l.nv{color:var(--nv2)}
+  .between .aline{font-size:22px;color:var(--dim);line-height:1}
+  .loopnote{text-align:center;color:var(--sub);font-size:14px;margin-top:20px}
+  .loopnote b{color:var(--ink)}
+
+  footer{padding:56px 0;border-top:1px solid var(--line);text-align:center;color:var(--dim);font-size:14px}
+  .foot-cta{display:inline-flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:20px}
+  .btn{padding:12px 22px;border-radius:12px;font-weight:700;font-size:15px}
+  .btn.p{background:linear-gradient(100deg,var(--nv),var(--qw));color:#fff}
+  .btn.s{background:var(--card);border:1px solid var(--line);color:var(--ink)}
+
+  @media(max-width:760px){
+    .moves,.cfgs,.hwstrip{grid-template-columns:1fr}
+    .hwstrip{grid-template-columns:1fr 1fr}
+    .bar{grid-template-columns:1fr;gap:6px}.bar .lab{text-align:left}.bar .val{text-align:left}
+    .between{transform:rotate(90deg);min-width:auto;padding:14px 0}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <div class="orb a"></div><div class="orb b"></div>
+  <div class="wrap">
+    <span class="kick"><span class="pdot"></span> home lab · 1× DGX Spark · GB10</span>
+    <h1>Two models, one Spark,<br><span class="g1">2× faster on both ends.</span></h1>
+    <p class="lede">A weekend of tuning turned a co-located orchestrator + coder agent into a stack that's roughly twice as fast on <em>each</em> model — with no new hardware and no third-party images. Every number below was measured on the box.</p>
+    <div class="heros">
+      <div class="hs"><div class="v qw" data-to="105.6" data-suf="">0</div><div class="k">orchestrator tok/s</div></div>
+      <div class="hs"><div class="v nv" data-to="30.4" data-suf="">0</div><div class="k">coder tok/s</div></div>
+      <div class="hs"><div class="v" data-to="2" data-suf="×" style="color:var(--ink)">0</div><div class="k">models on one GB10</div></div>
+      <div class="hs"><div class="v" data-to="0" data-pre="$" style="color:var(--ink)">0</div><div class="k">cloud cost</div></div>
+    </div>
+    <div class="scroll">▾</div>
+  </div>
+</header>
+
+<!-- ================= THE 4 MOVES ================= -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow reveal">what actually moved the needle</div>
+    <h2 class="reveal d1">Four moves. Both models win.</h2>
+    <p class="lead reveal d2">The orchestrator fronts the conversation; the coder does the heavy lifting. Each got a targeted speedup, then we changed how they work together.</p>
+
+    <div class="moves">
+      <div class="move nv reveal">
+        <div class="no">MOVE 01 · CODER</div>
+        <h3>MTP was hiding in the checkpoint</h3>
+        <p>The NVFP4 weights ship a trained multi-token-prediction head. Turning it on — <code>method:mtp, n=3</code> — nearly tripled decode. Unlike n-gram, tool-calls stay clean. No new image needed.</p>
+        <div class="ba"><span class="from mono">11.6</span><span class="arrow">→</span><span class="to nv mono">30.4 tok/s</span><span class="mult">2.6×</span></div>
+      </div>
+      <div class="move qw reveal d1">
+        <div class="no">MOVE 02 · ORCHESTRATOR</div>
+        <h3>Swap the harness to a fast MoE</h3>
+        <p>Replaced a 30B reasoning model (forced-eager, ~50 tok/s) with Qwen3.6-35B-A3B — a 3B-active MoE that runs CUDA graphs + MTP. Same clean tool-calls, half the latency per turn.</p>
+        <div class="ba"><span class="from mono">51.7</span><span class="arrow">→</span><span class="to qw mono">105.6 tok/s</span><span class="mult qw">2.0×</span></div>
+      </div>
+      <div class="move qw reveal d2">
+        <div class="no">MOVE 03 · WORKFLOW</div>
+        <h3>Put the thinking where it's cheap</h3>
+        <p>Reasoning is cheap on the 105 tok/s orchestrator and expensive on the 30 tok/s coder. So the orchestrator thinks hard; the coder thinks medium and executes. Delegation turn dropped from 6.85s to 2.72s.</p>
+        <div class="ba"><span class="from mono">6.85s</span><span class="arrow">→</span><span class="to qw mono">2.72s / turn</span><span class="mult qw">2.5×</span></div>
+      </div>
+      <div class="move nv reveal d3">
+        <div class="no">MOVE 04 · QUALITY</div>
+        <h3>Fast hands, sharp eyes</h3>
+        <p>The fast MoE drafts; the stronger 27B critiques &amp; improves — only for complex code. In one test it caught 3 real bugs the draft missed (an unlocked <code>__repr__</code> race, a <code>bool</code>-is-<code>int</code> validation gap, a liveness-only test).</p>
+        <div class="ba"><span class="to nv mono" style="font-size:22px">3 real bugs caught</span><span class="mult">draft→critique</span></div>
+      </div>
+    </div>
+
+    <!-- speed ladder -->
+    <div class="chart reveal">
+      <h4>single-stream decode · measured on this GB10 · tok/s</h4>
+      <div class="bar"><div class="lab">Qwen3.6-35B <small>orchestrator · MoE + MTP</small></div><div class="track"><div class="fill fq36 f1"></div></div><div class="val">105.6</div></div>
+      <div class="bar"><div class="lab">Nemotron-3.5 30B <small>old orchestrator · eager</small></div><div class="track"><div class="fill fnemo f2"></div></div><div class="val">51.7</div></div>
+      <div class="bar"><div class="lab">Qwen3.8-27B + MTP <small>coder · champion</small></div><div class="track"><div class="fill fq38m f3"></div></div><div class="val">30.4</div></div>
+      <div class="bar"><div class="lab">Qwen3.8-27B <small>coder · baseline, no spec</small></div><div class="track"><div class="fill fq38b f4"></div></div><div class="val">11.6</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DGX SPARK SETTINGS ================= -->
+<section style="background:linear-gradient(180deg,transparent,rgba(10,14,21,.6),transparent)">
+  <div class="wrap">
+    <div class="eyebrow nv reveal">the exact box config</div>
+    <h2 class="reveal d1">DGX Spark settings</h2>
+    <p class="lead reveal d2">Two NVFP4 models resident on one unified-memory GB10. The whole fight is memory + startup order.</p>
+
+    <div class="hwstrip reveal">
+      <div class="hw"><div class="v">GB10</div><div class="k">Grace-Blackwell · sm_121a</div></div>
+      <div class="hw"><div class="v">121.7 GiB</div><div class="k">unified LPDDR5X</div></div>
+      <div class="hw"><div class="v">~273 GB/s</div><div class="k">memory bandwidth</div></div>
+      <div class="hw"><div class="v">vLLM 0.26</div><div class="k">openai-aarch64 image</div></div>
+    </div>
+
+    <div class="cfgs">
+      <div class="cfg reveal">
+        <div class="top"><div class="dots"><i></i><i></i><i></i></div><div class="role">orchestrator · <b>:8002</b> · util 0.42</div></div>
+<pre><span class="cm"># Qwen3.6-35B-A3B · MoE (3B active) · NVFP4</span>
+vllm serve <span class="vl">Qwen3.6-35B-A3B-NVFP4</span> \
+  <span class="fl">--quantization</span> modelopt \
+  <span class="fl">--moe-backend</span> marlin \
+  <span class="fl">--speculative-config</span> '{"method":"mtp",
+        "num_speculative_tokens":<span class="vl">3</span>}' \
+  <span class="fl">--tool-call-parser</span> qwen3_coder \
+  <span class="fl">--enable-thinking</span> <span class="cm"># reasons hard</span> \
+  <span class="fl">--gpu-memory-utilization</span> <span class="vl">0.42</span></pre>
+      </div>
+      <div class="cfg nvtop reveal d1">
+        <div class="top"><div class="dots"><i></i><i></i><i></i></div><div class="role">coder · <b>:8000</b> · util 0.45</div></div>
+<pre><span class="cm"># Qwen3.8-27B · Qwen3_5 hybrid · NVFP4</span>
+vllm serve <span class="vl">Qwen3.8-27B-NVFP4</span> \
+  <span class="fl">--speculative-config</span> '{"method":"mtp",
+        "num_speculative_tokens":<span class="vl">3</span>}' \
+  <span class="fl">--attention-backend</span> flashinfer \
+  <span class="fl">--enable-prefix-caching</span> \
+  <span class="fl">--tool-call-parser</span> qwen3_coder \
+  <span class="fl">--enable-thinking</span> <span class="cm"># medium, it critiques</span> \
+  <span class="fl">--gpu-memory-utilization</span> <span class="vl">0.45</span></pre>
+      </div>
+    </div>
+
+    <div class="rules reveal">
+      <b>⚠ Co-location rules (learned the hard way)</b>
+      <ul>
+        <li><b>Utils are per-process shares of the whole pool</b> — they must fit <em>free</em> memory and sum ≲ 0.88 (0.42 + 0.45 here). Not a device-wide ceiling.</li>
+        <li><b>Start sequentially, coder first</b> — starting both at once races; the second dies with "no available memory for the cache blocks."</li>
+        <li><b>MTP head loads from the checkpoint</b> — no draft model, no third-party build; the stock v0.26 aarch64 image already registers the arch.</li>
+        <li><b><code>--restart no</code> + one ordered boot script</b> — Docker auto-restart re-introduces the race on reboot.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= ARCHITECTURE ================= -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow reveal">how they work together</div>
+    <h2 class="reveal d1">Orchestrator drafts. Coder sharpens.</h2>
+    <p class="lead reveal d2">One agent front-end, two models on one GB10. The fast MoE plans and drafts; complex code gets a critique pass from the stronger coder before it ships.</p>
+
+    <div class="diagram reveal">
+      <div class="flow">
+        <div class="gb10">
+          <div class="tag">1× DGX Spark · GB10 · 121.7 GiB unified</div>
+          <div class="mnode orch">
+            <div class="r">orchestrator · <b>:8002</b></div>
+            <h4>Qwen3.6-35B-A3B</h4>
+            <div class="sp">MoE · 3B active · MTP · thinks hard</div>
+            <div class="mono small">105.6 tok/s · 2.72 s / turn</div>
+          </div>
+          <div class="between">
+            <span class="l">draft + spec →</span>
+            <span class="aline">⇄</span>
+            <span class="l nv">← critique + fixes</span>
+          </div>
+          <div class="mnode coder">
+            <div class="r">coder · <b>:8000</b></div>
+            <h4>Qwen3.8-27B</h4>
+            <div class="sp">Qwen3_5 hybrid · MTP · critiques</div>
+            <div class="mono small">30.4 tok/s · finds the subtle bugs</div>
+          </div>
+        </div>
+      </div>
+      <p class="loopnote">Trivial code → the orchestrator just writes it. <b>Complex code</b> → it drafts fast, hands the draft to the 27B for a correctness/edge-case/perf critique, then integrates the sharper version. Reasoning lives where it's cheap; depth is applied where it counts.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-cta">
+      <a class="btn p" href="index.html">The full recipe →</a>
+      <a class="btn s" href="https://github.com/hsrakri/sparky">GitHub · hsrakri/sparky</a>
+    </div>
+    <div>Built &amp; measured on a home-lab NVIDIA DGX Spark. Two NVFP4 models, one GB10, zero cloud spend.</div>
+  </div>
+</footer>
+
+<script>
+  // scroll reveals
+  var io = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); } });
+  },{threshold:.16});
+  document.querySelectorAll('.reveal, .chart').forEach(function(el){ io.observe(el); });
+
+  // count-up for hero stats
+  function animate(el){
+    var to=parseFloat(el.dataset.to), pre=el.dataset.pre||'', suf=el.dataset.suf||'';
+    var dec=(to%1!==0)?1:0, t0=null, dur=1100;
+    function step(ts){ if(!t0)t0=ts; var p=Math.min((ts-t0)/dur,1); var e=1-Math.pow(1-p,3);
+      el.textContent=pre+(to*e).toFixed(dec)+suf; if(p<1)requestAnimationFrame(step); else el.textContent=pre+to.toFixed(dec)+suf; }
+    requestAnimationFrame(step);
+  }
+  var hio=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ animate(e.target); hio.unobserve(e.target);} }); },{threshold:.5});
+  document.querySelectorAll('.hs .v[data-to]').forEach(function(el){ hio.observe(el); });
+</script>
+</body>
+</html>
