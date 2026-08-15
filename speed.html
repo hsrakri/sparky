@@ -204,40 +204,6 @@
   </div>
 </header>
 
-<!-- ================= THE 4 MOVES ================= -->
-<section>
-  <div class="wrap">
-    <div class="eyebrow reveal">what moved the needle</div>
-    <h2 class="reveal d1">Four moves. Both models win.</h2>
-    <div class="moves">
-      <div class="move nv reveal">
-        <div class="no">MOVE 01 · CODER</div>
-        <h3>MTP was hiding in the checkpoint</h3>
-        <p>The NVFP4 weights ship a trained multi-token-prediction head. Enabling it — <code>method:mtp, n=3</code> — nearly tripled code decode, with tool-calls intact. No new image needed.</p>
-        <div class="ba"><span class="from mono">11.6</span><span class="arrow">→</span><span class="to nv mono">30.4 tok/s</span><span class="mult">2.6×</span></div>
-      </div>
-      <div class="move qw reveal d1">
-        <div class="no">MOVE 02 · ORCHESTRATOR</div>
-        <h3>Swap the harness to a fast MoE</h3>
-        <p>Replaced a 30B reasoning model (forced-eager, ~50 tok/s) with a 3B-active MoE running CUDA graphs + MTP. Same clean tool-calls, half the latency per turn.</p>
-        <div class="ba"><span class="from mono">51.7</span><span class="arrow">→</span><span class="to qw mono">105.6 tok/s</span><span class="mult qw">2.0×</span></div>
-      </div>
-      <div class="move qw reveal d2">
-        <div class="no">MOVE 03 · WORKFLOW</div>
-        <h3>Think where it's cheap</h3>
-        <p>Reasoning lives on the 105 tok/s orchestrator (thinking: high); the 30 tok/s coder thinks medium and executes. The delegation turn collapsed.</p>
-        <div class="ba"><span class="from mono">6.85s</span><span class="arrow">→</span><span class="to qw mono">2.72s / turn</span><span class="mult qw">2.5×</span></div>
-      </div>
-      <div class="move nv reveal d3">
-        <div class="no">MOVE 04 · QUALITY</div>
-        <h3>Fast hands, sharp eyes</h3>
-        <p>The MoE drafts; the stronger 27B critiques &amp; improves — complex code only. First trial: it caught <b>3 real bugs</b> the draft missed (an unlocked <code>__repr__</code> race, a <code>bool</code>-is-<code>int</code> gap, a liveness-only test).</p>
-        <div class="ba"><span class="to nv mono" style="font-size:22px">draft → critique</span><span class="mult">quality loop</span></div>
-      </div>
-    </div>
-  </div>
-</section>
-
 <!-- ================= DECODE CURVES ================= -->
 <section style="background:linear-gradient(180deg,transparent,rgba(10,14,21,.55),transparent)">
   <div class="wrap">
@@ -316,6 +282,40 @@
           <p><b>7,372 / 13,503</b> draft tokens accepted on mixed work. On code it's higher — which is exactly why the coder hits 30+ tok/s there.</p>
           <div class="mono small">4,501 drafts · MTP n=3</div>
         </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= THE 4 MOVES ================= -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow reveal">what moved the needle</div>
+    <h2 class="reveal d1">Four moves. Both models win.</h2>
+    <div class="moves">
+      <div class="move nv reveal">
+        <div class="no">MOVE 01 · CODER</div>
+        <h3>MTP was hiding in the checkpoint</h3>
+        <p>The NVFP4 weights ship a trained multi-token-prediction head. Enabling it — <code>method:mtp, n=3</code> — nearly tripled code decode, with tool-calls intact. No new image needed.</p>
+        <div class="ba"><span class="from mono">11.6</span><span class="arrow">→</span><span class="to nv mono">30.4 tok/s</span><span class="mult">2.6×</span></div>
+      </div>
+      <div class="move qw reveal d1">
+        <div class="no">MOVE 02 · ORCHESTRATOR</div>
+        <h3>Swap the harness to a fast MoE</h3>
+        <p>Replaced a 30B reasoning model (forced-eager, ~50 tok/s) with a 3B-active MoE running CUDA graphs + MTP. Same clean tool-calls, half the latency per turn.</p>
+        <div class="ba"><span class="from mono">51.7</span><span class="arrow">→</span><span class="to qw mono">105.6 tok/s</span><span class="mult qw">2.0×</span></div>
+      </div>
+      <div class="move qw reveal d2">
+        <div class="no">MOVE 03 · WORKFLOW</div>
+        <h3>Think where it's cheap</h3>
+        <p>Reasoning lives on the 105 tok/s orchestrator (thinking: high); the 30 tok/s coder thinks medium and executes. The delegation turn collapsed.</p>
+        <div class="ba"><span class="from mono">6.85s</span><span class="arrow">→</span><span class="to qw mono">2.72s / turn</span><span class="mult qw">2.5×</span></div>
+      </div>
+      <div class="move nv reveal d3">
+        <div class="no">MOVE 04 · QUALITY</div>
+        <h3>Fast hands, sharp eyes</h3>
+        <p>The MoE drafts; the stronger 27B critiques &amp; improves — complex code only. First trial: it caught <b>3 real bugs</b> the draft missed (an unlocked <code>__repr__</code> race, a <code>bool</code>-is-<code>int</code> gap, a liveness-only test).</p>
+        <div class="ba"><span class="to nv mono" style="font-size:22px">draft → critique</span><span class="mult">quality loop</span></div>
       </div>
     </div>
   </div>
