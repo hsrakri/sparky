@@ -3,17 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>2× on both ends — tuning a two-model agent on one DGX Spark</title>
-<meta name="description" content="How a home-lab DGX Spark (GB10, 128GB) got ~2× faster on both the orchestrator and the coder — MTP speculative decoding, a MoE orchestrator swap, a thinking split, and a draft→critique loop. Every number measured on the box.">
-<meta property="og:title" content="2× on both ends — a two-model agent on one DGX Spark">
-<meta property="og:description" content="MTP decoding, a MoE orchestrator swap, a thinking split, and a fast-draft→strong-critique loop. All measured on one GB10.">
+<title>2× on both ends — the full performance picture of a two-model DGX Spark</title>
+<meta name="description" content="Deep-dive benchmarks of a co-located orchestrator + coder on one DGX Spark GB10: decode curves, TTFT vs context, concurrency scaling to 514 tok/s, MTP acceptance rates, and the exact settings.">
+<meta property="og:title" content="2× on both ends — the full performance picture, one DGX Spark">
+<meta property="og:description" content="Decode curves, TTFT vs context, 514 tok/s aggregate, MTP acceptance — every number measured on one GB10.">
 <meta property="og:type" content="article">
 <meta name="twitter:card" content="summary_large_image">
 <style>
   :root{
-    --bg:#06080c; --bg2:#0a0e15; --card:#0f1520; --card2:#131b28;
+    --bg:#05070b; --bg2:#0a0e15; --card:#0e141f; --card2:#121a27;
     --ink:#eef4fb; --sub:#93a4b7; --dim:#5a6b7e;
-    --nv:#76b900; --nv2:#a4e34d; --qw:#8b6dff; --qw2:#b39dff; --amber:#ffb347; --hot:#ff6b6b;
+    --nv:#76b900; --nv2:#a4e34d; --qw:#8b6dff; --qw2:#b39dff; --amber:#ffb347; --hot:#ff6b6b; --cyan:#4dd0e1;
     --line:rgba(150,170,195,.13); --r:20px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -21,50 +21,55 @@
   body{background:var(--bg);color:var(--ink);overflow-x:hidden;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
     line-height:1.6;-webkit-font-smoothing:antialiased}
-  .mono{font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace}
-  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em;
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.86em;
     background:rgba(150,170,195,.1);padding:.1em .42em;border-radius:6px;color:var(--qw2)}
   a{color:var(--qw2);text-decoration:none} a:hover{text-decoration:underline}
-  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
-  section{padding:60px 0;position:relative}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 24px}
+  section{padding:64px 0;position:relative}
 
-  /* ---------- HERO ---------- */
-  .hero{min-height:88vh;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden;text-align:center;padding:80px 0 50px}
-  .orb{position:absolute;border-radius:50%;filter:blur(20px);opacity:.5;z-index:0}
-  .orb.a{width:44vmax;height:44vmax;background:radial-gradient(circle,rgba(118,185,0,.28),transparent 62%);top:-20vmax;right:-14vmax;animation:drift 24s ease-in-out infinite alternate}
-  .orb.b{width:40vmax;height:40vmax;background:radial-gradient(circle,rgba(139,109,255,.30),transparent 62%);bottom:-18vmax;left:-12vmax;animation:drift2 30s ease-in-out infinite alternate}
-  @keyframes drift{to{transform:translate(-8vmax,6vmax) scale(1.12)}}
-  @keyframes drift2{to{transform:translate(7vmax,-5vmax) scale(1.1)}}
+  /* progress bar */
+  #prog{position:fixed;top:0;left:0;height:2.5px;width:0;z-index:99;background:linear-gradient(90deg,var(--nv),var(--qw));transition:width .1s linear}
+
+  /* HERO */
+  .hero{min-height:92vh;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden;text-align:center;padding:80px 0 40px}
+  .orb{position:absolute;border-radius:50%;filter:blur(22px);opacity:.5;z-index:0;pointer-events:none}
+  .orb.a{width:46vmax;height:46vmax;background:radial-gradient(circle,rgba(118,185,0,.26),transparent 62%);top:-20vmax;right:-15vmax;animation:drift 26s ease-in-out infinite alternate}
+  .orb.b{width:42vmax;height:42vmax;background:radial-gradient(circle,rgba(139,109,255,.3),transparent 62%);bottom:-18vmax;left:-13vmax;animation:drift2 32s ease-in-out infinite alternate}
+  @keyframes drift{to{transform:translate(-8vmax,6vmax) scale(1.14)}}
+  @keyframes drift2{to{transform:translate(7vmax,-6vmax) scale(1.1)}}
+  .gridbg{position:absolute;inset:0;background-image:linear-gradient(rgba(150,170,195,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(150,170,195,.05) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(80% 70% at 50% 40%,#000 30%,transparent 75%);z-index:0}
   .hero .wrap{position:relative;z-index:1}
   .kick{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;
-    color:var(--nv2);border:1px solid var(--line);border-radius:999px;padding:8px 16px;margin-bottom:30px;background:rgba(15,21,32,.5)}
+    color:var(--nv2);border:1px solid var(--line);border-radius:999px;padding:8px 16px;margin-bottom:30px;background:rgba(14,20,31,.55);backdrop-filter:blur(6px)}
   .pdot{width:8px;height:8px;border-radius:50%;background:var(--nv);box-shadow:0 0 12px var(--nv);animation:pulse 2s infinite}
-  @keyframes pulse{50%{opacity:.4}}
-  h1{font-size:clamp(38px,7vw,78px);line-height:1.02;letter-spacing:-.03em;font-weight:850}
-  .g1{background:linear-gradient(105deg,var(--nv2) 10%,var(--qw2) 90%);-webkit-background-clip:text;background-clip:text;color:transparent;
-    background-size:200% auto;animation:sheen 6s linear infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  h1{font-size:clamp(38px,7vw,80px);line-height:1.02;letter-spacing:-.03em;font-weight:850}
+  .g1{background:linear-gradient(105deg,var(--nv2) 5%,var(--cyan) 50%,var(--qw2) 95%);-webkit-background-clip:text;background-clip:text;color:transparent;background-size:200% auto;animation:sheen 7s linear infinite}
   @keyframes sheen{to{background-position:200% center}}
-  .lede{max-width:640px;margin:26px auto 0;color:var(--sub);font-size:19px}
-  .heros{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:38px}
-  .hs{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 24px;min-width:150px}
+  .lede{max-width:660px;margin:26px auto 0;color:var(--sub);font-size:19px}
+  .heros{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:40px}
+  .hs{background:rgba(14,20,31,.7);border:1px solid var(--line);border-radius:16px;padding:18px 24px;min-width:152px;backdrop-filter:blur(8px);transition:transform .3s,border-color .3s}
+  .hs:hover{transform:translateY(-4px);border-color:rgba(150,170,195,.3)}
   .hs .v{font-size:34px;font-weight:850;line-height:1;font-variant-numeric:tabular-nums}
-  .hs .v.nv{color:var(--nv2)} .hs .v.qw{color:var(--qw2)}
+  .hs .v.nv{color:var(--nv2)} .hs .v.qw{color:var(--qw2)} .hs .v.cy{color:var(--cyan)}
   .hs .k{font-size:12.5px;color:var(--sub);margin-top:8px;text-transform:uppercase;letter-spacing:.05em}
   .scroll{margin-top:46px;color:var(--dim);font-size:26px;animation:bob 1.8s ease-in-out infinite}
   @keyframes bob{50%{transform:translateY(9px)}}
 
-  /* ---------- shared ---------- */
+  /* shared */
   .eyebrow{font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--qw2);margin-bottom:12px;font-weight:700}
-  .eyebrow.nv{color:var(--nv2)}
-  h2{font-size:clamp(27px,4vw,40px);letter-spacing:-.02em;line-height:1.1;font-weight:800}
-  .lead{color:var(--sub);font-size:17px;max-width:680px;margin-top:14px}
-  .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+  .eyebrow.nv{color:var(--nv2)} .eyebrow.cy{color:var(--cyan)}
+  h2{font-size:clamp(27px,4vw,42px);letter-spacing:-.02em;line-height:1.08;font-weight:800}
+  .lead{color:var(--sub);font-size:17px;max-width:700px;margin-top:14px}
+  .reveal{opacity:0;transform:translateY(28px);transition:opacity .75s cubic-bezier(.2,.7,.2,1),transform .75s cubic-bezier(.2,.7,.2,1)}
   .reveal.in{opacity:1;transform:none}
   .d1{transition-delay:.08s}.d2{transition-delay:.16s}.d3{transition-delay:.24s}
 
-  /* ---------- MOVES ---------- */
+  /* moves */
   .moves{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:34px}
-  .move{background:linear-gradient(160deg,var(--card),var(--bg2));border:1px solid var(--line);border-radius:var(--r);padding:26px;position:relative;overflow:hidden}
+  .move{background:linear-gradient(160deg,var(--card),var(--bg2));border:1px solid var(--line);border-radius:var(--r);padding:26px;position:relative;overflow:hidden;transition:transform .35s,box-shadow .35s}
+  .move:hover{transform:translateY(-5px);box-shadow:0 24px 60px -30px rgba(0,0,0,.8)}
   .move::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--edge,var(--nv))}
   .move.qw{--edge:linear-gradient(90deg,var(--qw),var(--qw2))}
   .move.nv{--edge:linear-gradient(90deg,var(--nv),var(--nv2))}
@@ -79,28 +84,45 @@
   .ba .mult{margin-left:auto;font-size:13px;font-weight:800;padding:5px 11px;border-radius:999px;background:rgba(118,185,0,.14);color:var(--nv2);border:1px solid rgba(118,185,0,.25)}
   .ba .mult.qw{background:rgba(139,109,255,.14);color:var(--qw2);border-color:rgba(139,109,255,.25)}
 
-  /* ---------- SPEED BARS ---------- */
-  .chart{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:30px;margin-top:30px}
-  .chart h4{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:22px}
-  .bar{display:grid;grid-template-columns:190px 1fr 92px;gap:14px;align-items:center;margin-bottom:16px}
-  .bar .lab{font-size:14px;font-weight:600;text-align:right}
-  .bar .lab small{display:block;color:var(--dim);font-weight:500;font-size:11.5px}
-  .bar .track{height:28px;background:rgba(150,170,195,.07);border-radius:9px;overflow:hidden;border:1px solid var(--line)}
-  .bar .fill{height:100%;width:0;border-radius:9px;transition:width 1.4s cubic-bezier(.2,.7,.15,1)}
-  .in .f1{width:100%}.in .f2{width:46.4%}.in .f3{width:26.7%}.in .f4{width:10.2%}
-  .fq36{background:linear-gradient(90deg,#5a48b8,var(--qw))}
-  .fnemo{background:linear-gradient(90deg,#4a7a08,var(--nv))}
-  .fq38m{background:linear-gradient(90deg,var(--nv),var(--nv2))}
-  .fq38b{background:linear-gradient(90deg,#6b6b7a,#9aa0b0)}
-  .bar .val{font-family:ui-monospace,monospace;font-weight:850;font-size:15px;text-align:right;font-variant-numeric:tabular-nums}
+  /* chart panels */
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:28px;margin-top:26px}
+  .panel h4{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:6px}
+  .panel .sub2{font-size:13.5px;color:var(--dim);margin-bottom:18px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--sub);margin-bottom:14px}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:7px;vertical-align:-1px}
+  svg text{font-family:ui-monospace,Menlo,Consolas,monospace;fill:var(--dim);font-size:11px}
+  svg .axis{stroke:rgba(150,170,195,.15);stroke-width:1}
+  svg .gline{stroke:rgba(150,170,195,.07);stroke-width:1}
+  .tip{position:fixed;pointer-events:none;background:#0c1220;border:1px solid var(--line);border-radius:10px;padding:9px 13px;font-size:12.5px;color:var(--ink);z-index:50;opacity:0;transition:opacity .15s;box-shadow:0 12px 30px -12px rgba(0,0,0,.8);font-family:ui-monospace,monospace;white-space:nowrap}
+  .tip b{color:var(--nv2)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 
-  /* ---------- DGX SETTINGS ---------- */
+  /* concurrency dual bars */
+  .cbar{display:grid;grid-template-columns:56px 1fr 150px;gap:12px;align-items:center;margin-bottom:12px}
+  .cbar .n{font-family:ui-monospace,monospace;font-size:13px;color:var(--sub);text-align:right}
+  .cbar .track{height:26px;background:rgba(150,170,195,.06);border-radius:8px;overflow:hidden;border:1px solid var(--line);position:relative}
+  .cbar .fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:8px;transition:width 1.3s cubic-bezier(.2,.7,.15,1)}
+  .cbar .vals{font-family:ui-monospace,monospace;font-size:12.5px;color:var(--sub)}
+  .cbar .vals b{color:var(--ink);font-size:14px}
+
+  /* acceptance donuts */
+  .accept{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px}
+  .acc{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:26px;display:flex;gap:22px;align-items:center}
+  .acc .ring{position:relative;width:110px;height:110px;flex:none}
+  .acc .ring svg{transform:rotate(-90deg)}
+  .acc .ring .pct{position:absolute;inset:0;display:grid;place-items:center;font-weight:850;font-size:22px;font-variant-numeric:tabular-nums}
+  .acc .body h5{font-size:16px;margin-bottom:4px}
+  .acc .body p{font-size:13.5px;color:var(--sub)}
+  .acc .body .mono.small{font-size:12px;color:var(--dim);margin-top:8px}
+
+  /* settings */
   .hwstrip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:30px}
-  .hw{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:18px}
-  .hw .v{font-size:22px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+  .hw{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:18px;transition:transform .3s}
+  .hw:hover{transform:translateY(-3px)}
+  .hw .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
   .hw .k{font-size:11.5px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-top:5px}
   .cfgs{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px}
-  .cfg{background:#080b10;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .cfg{background:#070b11;border:1px solid var(--line);border-radius:16px;overflow:hidden}
   .cfg .top{display:flex;align-items:center;gap:9px;padding:13px 18px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,rgba(139,109,255,.08),transparent)}
   .cfg.nvtop .top{background:linear-gradient(90deg,rgba(118,185,0,.08),transparent)}
   .cfg .top .role{font-size:12px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
@@ -112,52 +134,70 @@
   .rules{margin-top:22px;background:var(--card2);border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:12px;padding:18px 22px}
   .rules b{color:var(--amber)} .rules ul{margin:10px 0 0 18px;color:var(--sub);font-size:14px} .rules li{margin:5px 0}
 
-  /* ---------- DIAGRAM ---------- */
+  /* thinking split table */
+  .think{margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .tcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:24px}
+  .tcard .who{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim)}
+  .tcard .who b{color:var(--qw2)} .tcard.nv .who b{color:var(--nv2)}
+  .tcard h5{font-size:18px;margin:6px 0 10px}
+  .tcard .lvl{display:inline-block;font-size:12px;font-weight:800;padding:4px 12px;border-radius:999px;margin-bottom:10px}
+  .tcard .lvl.hi{background:rgba(139,109,255,.15);color:var(--qw2);border:1px solid rgba(139,109,255,.3)}
+  .tcard .lvl.med{background:rgba(118,185,0,.14);color:var(--nv2);border:1px solid rgba(118,185,0,.28)}
+  .tcard p{font-size:14px;color:var(--sub)}
+
+  /* diagram */
   .diagram{margin-top:30px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:34px 26px}
-  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;justify-content:center}
-  .gb10{border:1.5px dashed rgba(118,185,0,.4);border-radius:18px;padding:20px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;justify-content:center;position:relative;background:radial-gradient(120% 120% at 50% 0%,rgba(118,185,0,.05),transparent)}
+  .gb10{border:1.5px dashed rgba(118,185,0,.4);border-radius:18px;padding:22px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;justify-content:center;position:relative;background:radial-gradient(120% 120% at 50% 0%,rgba(118,185,0,.05),transparent)}
   .gb10 .tag{position:absolute;top:-11px;left:22px;background:var(--bg);padding:0 10px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--nv2)}
-  .mnode{background:linear-gradient(160deg,var(--card2),var(--bg2));border:1px solid var(--line);border-radius:16px;padding:20px;min-width:230px;position:relative}
+  .mnode{background:linear-gradient(160deg,var(--card2),var(--bg2));border:1px solid var(--line);border-radius:16px;padding:20px;min-width:235px;transition:transform .3s}
+  .mnode:hover{transform:scale(1.03)}
   .mnode.orch{box-shadow:0 0 0 1px rgba(139,109,255,.3),0 20px 50px -30px rgba(139,109,255,.5)}
   .mnode.coder{box-shadow:0 0 0 1px rgba(118,185,0,.3),0 20px 50px -30px rgba(118,185,0,.5)}
   .mnode .r{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim)}
   .mnode .r b{color:var(--qw2)} .mnode.coder .r b{color:var(--nv2)}
   .mnode h4{font-size:17px;margin:6px 0 4px}
-  .mnode .sp{font-size:12.5px;color:var(--sub)} .mnode .mono.small{font-size:11.5px;color:var(--dim);margin-top:8px}
-  .between{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:0 8px;min-width:120px}
+  .mnode .sp{font-size:12.5px;color:var(--sub)} .mnode .ms{font-size:11.5px;color:var(--dim);margin-top:8px;font-family:ui-monospace,monospace}
+  .between{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:0 10px;min-width:130px}
   .between .l{font-size:11px;color:var(--qw2);letter-spacing:.05em}
   .between .l.nv{color:var(--nv2)}
-  .between .aline{font-size:22px;color:var(--dim);line-height:1}
+  .pulseline{width:100%;height:2px;position:relative;background:rgba(150,170,195,.12);border-radius:2px;overflow:hidden}
+  .pulseline i{position:absolute;top:0;bottom:0;width:34%;border-radius:2px;background:linear-gradient(90deg,transparent,var(--qw2),transparent);animation:flow 1.7s linear infinite}
+  .pulseline.back i{background:linear-gradient(90deg,transparent,var(--nv2),transparent);animation:flowb 1.7s linear infinite}
+  @keyframes flow{from{left:-34%}to{left:100%}}
+  @keyframes flowb{from{left:100%}to{left:-34%}}
   .loopnote{text-align:center;color:var(--sub);font-size:14px;margin-top:20px}
   .loopnote b{color:var(--ink)}
 
   footer{padding:56px 0;border-top:1px solid var(--line);text-align:center;color:var(--dim);font-size:14px}
   .foot-cta{display:inline-flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:20px}
-  .btn{padding:12px 22px;border-radius:12px;font-weight:700;font-size:15px}
+  .btn{padding:12px 22px;border-radius:12px;font-weight:700;font-size:15px;transition:transform .25s}
+  .btn:hover{transform:translateY(-2px);text-decoration:none}
   .btn.p{background:linear-gradient(100deg,var(--nv),var(--qw));color:#fff}
   .btn.s{background:var(--card);border:1px solid var(--line);color:var(--ink)}
 
-  @media(max-width:760px){
-    .moves,.cfgs,.hwstrip{grid-template-columns:1fr}
+  @media(max-width:780px){
+    .moves,.cfgs,.grid2,.accept,.think{grid-template-columns:1fr}
     .hwstrip{grid-template-columns:1fr 1fr}
-    .bar{grid-template-columns:1fr;gap:6px}.bar .lab{text-align:left}.bar .val{text-align:left}
-    .between{transform:rotate(90deg);min-width:auto;padding:14px 0}
+    .between{transform:rotate(90deg);min-width:auto;padding:16px 0}
   }
 </style>
 </head>
 <body>
+<div id="prog"></div>
+<div class="tip" id="tip"></div>
 
 <!-- ================= HERO ================= -->
 <header class="hero">
-  <div class="orb a"></div><div class="orb b"></div>
+  <div class="gridbg"></div><div class="orb a"></div><div class="orb b"></div>
   <div class="wrap">
-    <span class="kick"><span class="pdot"></span> home lab · 1× DGX Spark · GB10</span>
-    <h1>Two models, one Spark,<br><span class="g1">2× faster on both ends.</span></h1>
-    <p class="lede">A weekend of tuning turned a co-located orchestrator + coder agent into a stack that's roughly twice as fast on <em>each</em> model — with no new hardware and no third-party images. Every number below was measured on the box.</p>
+    <span class="kick"><span class="pdot"></span> home lab · 1× DGX Spark · GB10 · all numbers measured</span>
+    <h1>Two models. One Spark.<br><span class="g1">The full performance picture.</span></h1>
+    <p class="lede">A co-located orchestrator + coder agent, tuned to roughly <b>2× on both ends</b> — then benchmarked properly: decode curves, time-to-first-token vs context, concurrency scaling, and real speculative-decoding acceptance rates.</p>
     <div class="heros">
-      <div class="hs"><div class="v qw" data-to="105.6" data-suf="">0</div><div class="k">orchestrator tok/s</div></div>
-      <div class="hs"><div class="v nv" data-to="30.4" data-suf="">0</div><div class="k">coder tok/s</div></div>
-      <div class="hs"><div class="v" data-to="2" data-suf="×" style="color:var(--ink)">0</div><div class="k">models on one GB10</div></div>
+      <div class="hs"><div class="v qw" data-to="112" data-suf="">0</div><div class="k">orchestrator tok/s peak</div></div>
+      <div class="hs"><div class="v cy" data-to="514" data-suf="">0</div><div class="k">aggregate tok/s @ 16-way</div></div>
+      <div class="hs"><div class="v nv" data-to="30.4" data-suf="">0</div><div class="k">coder tok/s on code</div></div>
+      <div class="hs"><div class="v qw" data-to="91" data-suf="ms">0</div><div class="k">fastest TTFT</div></div>
       <div class="hs"><div class="v" data-to="0" data-pre="$" style="color:var(--ink)">0</div><div class="k">cloud cost</div></div>
     </div>
     <div class="scroll">▾</div>
@@ -167,50 +207,122 @@
 <!-- ================= THE 4 MOVES ================= -->
 <section>
   <div class="wrap">
-    <div class="eyebrow reveal">what actually moved the needle</div>
+    <div class="eyebrow reveal">what moved the needle</div>
     <h2 class="reveal d1">Four moves. Both models win.</h2>
-    <p class="lead reveal d2">The orchestrator fronts the conversation; the coder does the heavy lifting. Each got a targeted speedup, then we changed how they work together.</p>
-
     <div class="moves">
       <div class="move nv reveal">
         <div class="no">MOVE 01 · CODER</div>
         <h3>MTP was hiding in the checkpoint</h3>
-        <p>The NVFP4 weights ship a trained multi-token-prediction head. Turning it on — <code>method:mtp, n=3</code> — nearly tripled decode. Unlike n-gram, tool-calls stay clean. No new image needed.</p>
+        <p>The NVFP4 weights ship a trained multi-token-prediction head. Enabling it — <code>method:mtp, n=3</code> — nearly tripled code decode, with tool-calls intact. No new image needed.</p>
         <div class="ba"><span class="from mono">11.6</span><span class="arrow">→</span><span class="to nv mono">30.4 tok/s</span><span class="mult">2.6×</span></div>
       </div>
       <div class="move qw reveal d1">
         <div class="no">MOVE 02 · ORCHESTRATOR</div>
         <h3>Swap the harness to a fast MoE</h3>
-        <p>Replaced a 30B reasoning model (forced-eager, ~50 tok/s) with Qwen3.6-35B-A3B — a 3B-active MoE that runs CUDA graphs + MTP. Same clean tool-calls, half the latency per turn.</p>
+        <p>Replaced a 30B reasoning model (forced-eager, ~50 tok/s) with a 3B-active MoE running CUDA graphs + MTP. Same clean tool-calls, half the latency per turn.</p>
         <div class="ba"><span class="from mono">51.7</span><span class="arrow">→</span><span class="to qw mono">105.6 tok/s</span><span class="mult qw">2.0×</span></div>
       </div>
       <div class="move qw reveal d2">
         <div class="no">MOVE 03 · WORKFLOW</div>
-        <h3>Put the thinking where it's cheap</h3>
-        <p>Reasoning is cheap on the 105 tok/s orchestrator and expensive on the 30 tok/s coder. So the orchestrator thinks hard; the coder thinks medium and executes. Delegation turn dropped from 6.85s to 2.72s.</p>
+        <h3>Think where it's cheap</h3>
+        <p>Reasoning lives on the 105 tok/s orchestrator (thinking: high); the 30 tok/s coder thinks medium and executes. The delegation turn collapsed.</p>
         <div class="ba"><span class="from mono">6.85s</span><span class="arrow">→</span><span class="to qw mono">2.72s / turn</span><span class="mult qw">2.5×</span></div>
       </div>
       <div class="move nv reveal d3">
         <div class="no">MOVE 04 · QUALITY</div>
         <h3>Fast hands, sharp eyes</h3>
-        <p>The fast MoE drafts; the stronger 27B critiques &amp; improves — only for complex code. In one test it caught 3 real bugs the draft missed (an unlocked <code>__repr__</code> race, a <code>bool</code>-is-<code>int</code> validation gap, a liveness-only test).</p>
-        <div class="ba"><span class="to nv mono" style="font-size:22px">3 real bugs caught</span><span class="mult">draft→critique</span></div>
+        <p>The MoE drafts; the stronger 27B critiques &amp; improves — complex code only. First trial: it caught <b>3 real bugs</b> the draft missed (an unlocked <code>__repr__</code> race, a <code>bool</code>-is-<code>int</code> gap, a liveness-only test).</p>
+        <div class="ba"><span class="to nv mono" style="font-size:22px">draft → critique</span><span class="mult">quality loop</span></div>
       </div>
-    </div>
-
-    <!-- speed ladder -->
-    <div class="chart reveal">
-      <h4>single-stream decode · measured on this GB10 · tok/s</h4>
-      <div class="bar"><div class="lab">Qwen3.6-35B <small>orchestrator · MoE + MTP</small></div><div class="track"><div class="fill fq36 f1"></div></div><div class="val">105.6</div></div>
-      <div class="bar"><div class="lab">Nemotron-3.5 30B <small>old orchestrator · eager</small></div><div class="track"><div class="fill fnemo f2"></div></div><div class="val">51.7</div></div>
-      <div class="bar"><div class="lab">Qwen3.8-27B + MTP <small>coder · champion</small></div><div class="track"><div class="fill fq38m f3"></div></div><div class="val">30.4</div></div>
-      <div class="bar"><div class="lab">Qwen3.8-27B <small>coder · baseline, no spec</small></div><div class="track"><div class="fill fq38b f4"></div></div><div class="val">11.6</div></div>
     </div>
   </div>
 </section>
 
-<!-- ================= DGX SPARK SETTINGS ================= -->
-<section style="background:linear-gradient(180deg,transparent,rgba(10,14,21,.6),transparent)">
+<!-- ================= DECODE CURVES ================= -->
+<section style="background:linear-gradient(180deg,transparent,rgba(10,14,21,.55),transparent)">
+  <div class="wrap">
+    <div class="eyebrow cy reveal">benchmark 01</div>
+    <h2 class="reveal d1">Decode speed, properly measured</h2>
+    <p class="lead reveal d2">Single-stream, temperature 0, on the co-located box. Hover the charts — every point is a real run.</p>
+
+    <div class="grid2">
+      <div class="panel reveal">
+        <h4>decode tok/s vs output length · prose</h4>
+        <div class="sub2">Sustained generation, 128 → 1024 tokens</div>
+        <div class="legend"><span><i style="background:var(--qw)"></i>orchestrator · Qwen3.6-A3B</span><span><i style="background:var(--nv)"></i>coder · Qwen3.8-27B + MTP</span></div>
+        <svg id="chartDecode" viewBox="0 0 460 240" width="100%"></svg>
+      </div>
+      <div class="panel reveal d1">
+        <h4>time-to-first-token vs context length</h4>
+        <div class="sub2">Streaming; prompt from 64 → 16K tokens</div>
+        <div class="legend"><span><i style="background:var(--qw)"></i>orchestrator</span><span><i style="background:var(--nv)"></i>coder</span></div>
+        <svg id="chartTTFT" viewBox="0 0 460 240" width="100%"></svg>
+      </div>
+    </div>
+
+    <div class="panel reveal">
+      <h4>content matters: what MTP acceptance does to the coder</h4>
+      <div class="sub2">The same model, same flags — the draft head predicts code far better than prose.</div>
+      <div class="cbar"><div class="n mono">code</div><div class="track"><div class="fill cf" data-w="100%" style="background:linear-gradient(90deg,var(--nv),var(--nv2))"></div></div><div class="vals"><b>30.4</b> tok/s · RateLimiter gen</div></div>
+      <div class="cbar"><div class="n mono">prose</div><div class="track"><div class="fill cf" data-w="70%" style="background:linear-gradient(90deg,#5d8f0a,#87b83a)"></div></div><div class="vals"><b>19–22</b> tok/s · tech explainer</div></div>
+      <div class="cbar"><div class="n mono">no spec</div><div class="track"><div class="fill cf" data-w="38%" style="background:linear-gradient(90deg,#6b6b7a,#9aa0b0)"></div></div><div class="vals"><b>11.6</b> tok/s · baseline</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CONCURRENCY ================= -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow reveal">benchmark 02</div>
+    <h2 class="reveal d1">One box, sixteen streams</h2>
+    <p class="lead reveal d2">Aggregate throughput scales hard on both models — while they share the same 121 GiB. All 16/16 requests succeeded at every level.</p>
+
+    <div class="grid2">
+      <div class="panel reveal">
+        <h4>orchestrator · aggregate tok/s</h4>
+        <div class="sub2">Qwen3.6-A3B (MoE) · 256-tok generations</div>
+        <div id="concOrch"></div>
+      </div>
+      <div class="panel reveal d1">
+        <h4>coder · aggregate tok/s</h4>
+        <div class="sub2">Qwen3.8-27B + MTP · 256-tok generations</div>
+        <div id="concCoder"></div>
+      </div>
+    </div>
+
+    <!-- acceptance -->
+    <div class="eyebrow nv reveal" style="margin-top:46px">benchmark 03</div>
+    <h2 class="reveal">Why MTP works: measured acceptance</h2>
+    <p class="lead reveal d1">Straight from vLLM's Prometheus counters over the whole suite — how often the draft head's guesses survive verification.</p>
+    <div class="accept">
+      <div class="acc reveal">
+        <div class="ring" data-pct="71.3" data-color="#8b6dff">
+          <svg width="110" height="110"><circle cx="55" cy="55" r="47" fill="none" stroke="rgba(150,170,195,.1)" stroke-width="10"/><circle class="arc" cx="55" cy="55" r="47" fill="none" stroke="#8b6dff" stroke-width="10" stroke-linecap="round" stroke-dasharray="295.3" stroke-dashoffset="295.3"/></svg>
+          <div class="pct" style="color:var(--qw2)">0%</div>
+        </div>
+        <div class="body">
+          <h5>Orchestrator · Qwen3.6-A3B</h5>
+          <p><b>31,309 / 43,927</b> draft tokens accepted. ≈ 2.14 bonus tokens per verified step — the engine that makes 105+ tok/s possible.</p>
+          <div class="mono small">14,654 drafts · MTP n=3</div>
+        </div>
+      </div>
+      <div class="acc reveal d1">
+        <div class="ring" data-pct="54.6" data-color="#76b900">
+          <svg width="110" height="110"><circle cx="55" cy="55" r="47" fill="none" stroke="rgba(150,170,195,.1)" stroke-width="10"/><circle class="arc" cx="55" cy="55" r="47" fill="none" stroke="#76b900" stroke-width="10" stroke-linecap="round" stroke-dasharray="295.3" stroke-dashoffset="295.3"/></svg>
+          <div class="pct" style="color:var(--nv2)">0%</div>
+        </div>
+        <div class="body">
+          <h5>Coder · Qwen3.8-27B</h5>
+          <p><b>7,372 / 13,503</b> draft tokens accepted on mixed work. On code it's higher — which is exactly why the coder hits 30+ tok/s there.</p>
+          <div class="mono small">4,501 drafts · MTP n=3</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DGX SETTINGS ================= -->
+<section style="background:linear-gradient(180deg,transparent,rgba(10,14,21,.55),transparent)">
   <div class="wrap">
     <div class="eyebrow nv reveal">the exact box config</div>
     <h2 class="reveal d1">DGX Spark settings</h2>
@@ -220,7 +332,7 @@
       <div class="hw"><div class="v">GB10</div><div class="k">Grace-Blackwell · sm_121a</div></div>
       <div class="hw"><div class="v">121.7 GiB</div><div class="k">unified LPDDR5X</div></div>
       <div class="hw"><div class="v">~273 GB/s</div><div class="k">memory bandwidth</div></div>
-      <div class="hw"><div class="v">vLLM 0.26</div><div class="k">openai-aarch64 image</div></div>
+      <div class="hw"><div class="v">vLLM 0.26</div><div class="k">stock aarch64 image</div></div>
     </div>
 
     <div class="cfgs">
@@ -233,8 +345,10 @@ vllm serve <span class="vl">Qwen3.6-35B-A3B-NVFP4</span> \
   <span class="fl">--speculative-config</span> '{"method":"mtp",
         "num_speculative_tokens":<span class="vl">3</span>}' \
   <span class="fl">--tool-call-parser</span> qwen3_coder \
-  <span class="fl">--enable-thinking</span> <span class="cm"># reasons hard</span> \
-  <span class="fl">--gpu-memory-utilization</span> <span class="vl">0.42</span></pre>
+  <span class="fl">--reasoning-parser</span> qwen3 \
+  <span class="cm"># enable_thinking: true — reasons hard</span>
+  <span class="fl">--gpu-memory-utilization</span> <span class="vl">0.42</span> \
+  <span class="fl">--max-model-len</span> <span class="vl">131072</span></pre>
       </div>
       <div class="cfg nvtop reveal d1">
         <div class="top"><div class="dots"><i></i><i></i><i></i></div><div class="role">coder · <b>:8000</b> · util 0.45</div></div>
@@ -245,19 +359,38 @@ vllm serve <span class="vl">Qwen3.8-27B-NVFP4</span> \
   <span class="fl">--attention-backend</span> flashinfer \
   <span class="fl">--enable-prefix-caching</span> \
   <span class="fl">--tool-call-parser</span> qwen3_coder \
-  <span class="fl">--enable-thinking</span> <span class="cm"># medium, it critiques</span> \
-  <span class="fl">--gpu-memory-utilization</span> <span class="vl">0.45</span></pre>
+  <span class="fl">--reasoning-parser</span> qwen3 \
+  <span class="cm"># enable_thinking: true — it critiques</span>
+  <span class="fl">--gpu-memory-utilization</span> <span class="vl">0.45</span> \
+  <span class="fl">--max-model-len</span> <span class="vl">131072</span> <span class="fl">--max-num-seqs</span> <span class="vl">32</span></pre>
       </div>
     </div>
 
     <div class="rules reveal">
       <b>⚠ Co-location rules (learned the hard way)</b>
       <ul>
-        <li><b>Utils are per-process shares of the whole pool</b> — they must fit <em>free</em> memory and sum ≲ 0.88 (0.42 + 0.45 here). Not a device-wide ceiling.</li>
-        <li><b>Start sequentially, coder first</b> — starting both at once races; the second dies with "no available memory for the cache blocks."</li>
-        <li><b>MTP head loads from the checkpoint</b> — no draft model, no third-party build; the stock v0.26 aarch64 image already registers the arch.</li>
+        <li><b>Utils are per-process shares of the whole pool</b> — must fit <em>free</em> memory and sum ≲ 0.88 (0.42 + 0.45 here). Not a device-wide ceiling.</li>
+        <li><b>Start sequentially, coder first</b> — simultaneous starts race; the loser dies with "no available memory for the cache blocks."</li>
+        <li><b>MTP loads from the checkpoint</b> — no draft model, no third-party build; stock v0.26 aarch64 registers the arch.</li>
         <li><b><code>--restart no</code> + one ordered boot script</b> — Docker auto-restart re-introduces the race on reboot.</li>
+        <li><b>A third model doesn't fit</b> — a 35B MoE + MTP fails engine-init below ~0.30 util. Two residents is the sweet spot.</li>
       </ul>
+    </div>
+
+    <!-- thinking split -->
+    <div class="think">
+      <div class="tcard reveal">
+        <div class="who">reasoning budget · <b>orchestrator</b></div>
+        <h5>Thinks hard, talks fast</h5>
+        <span class="lvl hi">thinking: HIGH</span>
+        <p>At 105 tok/s, reasoning is nearly free. It plans, decomposes, writes the first draft, and hands the coder a precise spec — signatures, file paths, test expectations.</p>
+      </div>
+      <div class="tcard nv reveal d1">
+        <div class="who">reasoning budget · <b>coder</b></div>
+        <h5>Thinks enough to catch bugs</h5>
+        <span class="lvl med">thinking: MEDIUM</span>
+        <p>At 30 tok/s, tokens are precious. Medium thinking is the sweet spot for its critic role — deep enough to spot an unlocked <code>__repr__</code>, cheap enough to stay responsive.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -265,34 +398,31 @@ vllm serve <span class="vl">Qwen3.8-27B-NVFP4</span> \
 <!-- ================= ARCHITECTURE ================= -->
 <section>
   <div class="wrap">
-    <div class="eyebrow reveal">how they work together</div>
+    <div class="eyebrow reveal">how it fits together</div>
     <h2 class="reveal d1">Orchestrator drafts. Coder sharpens.</h2>
-    <p class="lead reveal d2">One agent front-end, two models on one GB10. The fast MoE plans and drafts; complex code gets a critique pass from the stronger coder before it ships.</p>
-
     <div class="diagram reveal">
-      <div class="flow">
-        <div class="gb10">
-          <div class="tag">1× DGX Spark · GB10 · 121.7 GiB unified</div>
-          <div class="mnode orch">
-            <div class="r">orchestrator · <b>:8002</b></div>
-            <h4>Qwen3.6-35B-A3B</h4>
-            <div class="sp">MoE · 3B active · MTP · thinks hard</div>
-            <div class="mono small">105.6 tok/s · 2.72 s / turn</div>
-          </div>
-          <div class="between">
-            <span class="l">draft + spec →</span>
-            <span class="aline">⇄</span>
-            <span class="l nv">← critique + fixes</span>
-          </div>
-          <div class="mnode coder">
-            <div class="r">coder · <b>:8000</b></div>
-            <h4>Qwen3.8-27B</h4>
-            <div class="sp">Qwen3_5 hybrid · MTP · critiques</div>
-            <div class="mono small">30.4 tok/s · finds the subtle bugs</div>
-          </div>
+      <div class="gb10">
+        <div class="tag">1× DGX Spark · GB10 · 121.7 GiB unified · both resident</div>
+        <div class="mnode orch">
+          <div class="r">orchestrator · <b>:8002</b></div>
+          <h4>Qwen3.6-35B-A3B</h4>
+          <div class="sp">MoE · 3B active · MTP · thinking high</div>
+          <div class="ms">112 tok/s peak · 91 ms TTFT · 514 agg @16</div>
+        </div>
+        <div class="between">
+          <span class="l">draft + spec →</span>
+          <div class="pulseline"><i></i></div>
+          <div class="pulseline back"><i></i></div>
+          <span class="l nv">← critique + fixes</span>
+        </div>
+        <div class="mnode coder">
+          <div class="r">coder · <b>:8000</b></div>
+          <h4>Qwen3.8-27B</h4>
+          <div class="sp">Qwen3_5 hybrid · MTP · thinking medium</div>
+          <div class="ms">30.4 tok/s on code · 202 agg @16 · finds the subtle bugs</div>
         </div>
       </div>
-      <p class="loopnote">Trivial code → the orchestrator just writes it. <b>Complex code</b> → it drafts fast, hands the draft to the 27B for a correctness/edge-case/perf critique, then integrates the sharper version. Reasoning lives where it's cheap; depth is applied where it counts.</p>
+      <p class="loopnote">Trivial code → the orchestrator just writes it. <b>Complex code</b> → fast draft, then a correctness/edge-case/perf critique from the 27B, then integration. Reasoning lives where it's cheap; depth is applied where it counts.</p>
     </div>
   </div>
 </section>
@@ -301,29 +431,134 @@ vllm serve <span class="vl">Qwen3.8-27B-NVFP4</span> \
   <div class="wrap">
     <div class="foot-cta">
       <a class="btn p" href="index.html">The full recipe →</a>
+      <a class="btn s" href="results.html">Overnight soak results</a>
       <a class="btn s" href="https://github.com/hsrakri/sparky">GitHub · hsrakri/sparky</a>
     </div>
-    <div>Built &amp; measured on a home-lab NVIDIA DGX Spark. Two NVFP4 models, one GB10, zero cloud spend.</div>
+    <div>Built &amp; measured on a home-lab NVIDIA DGX Spark. Raw benchmark JSON in <a href="https://github.com/hsrakri/sparky/tree/main/benchmarks">/benchmarks</a>.</div>
   </div>
 </footer>
 
 <script>
-  // scroll reveals
-  var io = new IntersectionObserver(function(es){
-    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); } });
-  },{threshold:.16});
-  document.querySelectorAll('.reveal, .chart').forEach(function(el){ io.observe(el); });
+// ---------- data (measured 2026-08-15 on the box) ----------
+var DECODE = {
+  orch:  [[128,112.3],[256,102.0],[512,102.0],[1024,91.9]],
+  coder: [[128,22.1],[256,21.6],[512,19.4],[1024,19.7]]
+};
+var TTFT = {
+  orch:  [[64,91],[512,132],[2048,262],[8192,897],[16384,1842]],
+  coder: [[64,272],[512,354],[2048,730],[8192,1249],[16384,1730]]
+};
+var CONC = {
+  orch:  [[1,101.5,101.5],[2,168.7,84.3],[4,206.2,51.5],[8,376.4,47.0],[16,514.4,32.1]],
+  coder: [[1,21.4,21.4],[2,33.8,16.9],[4,69.5,17.4],[8,120.9,15.1],[16,202.2,12.6]]
+};
 
-  // count-up for hero stats
-  function animate(el){
-    var to=parseFloat(el.dataset.to), pre=el.dataset.pre||'', suf=el.dataset.suf||'';
-    var dec=(to%1!==0)?1:0, t0=null, dur=1100;
-    function step(ts){ if(!t0)t0=ts; var p=Math.min((ts-t0)/dur,1); var e=1-Math.pow(1-p,3);
-      el.textContent=pre+(to*e).toFixed(dec)+suf; if(p<1)requestAnimationFrame(step); else el.textContent=pre+to.toFixed(dec)+suf; }
-    requestAnimationFrame(step);
-  }
-  var hio=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ animate(e.target); hio.unobserve(e.target);} }); },{threshold:.5});
-  document.querySelectorAll('.hs .v[data-to]').forEach(function(el){ hio.observe(el); });
+var tip = document.getElementById('tip');
+function showTip(html,x,y){ tip.innerHTML=html; tip.style.opacity=1; tip.style.left=(x+14)+'px'; tip.style.top=(y-12)+'px'; }
+function hideTip(){ tip.style.opacity=0; }
+
+// ---------- line chart builder ----------
+function lineChart(svgId, series, opts){
+  var svg=document.getElementById(svgId); var W=460,H=240,P={l:44,r:14,t:14,b:30};
+  var xs=[],ys=[];
+  series.forEach(function(s){ s.data.forEach(function(d){ xs.push(d[0]); ys.push(d[1]); }); });
+  var xmin=Math.min.apply(null,xs), xmax=Math.max.apply(null,xs);
+  var ymax=Math.max.apply(null,ys)*1.15, ymin=0;
+  var logx = opts && opts.logx;
+  function X(v){ if(logx){ var a=Math.log(xmin),b=Math.log(xmax); return P.l+(Math.log(v)-a)/(b-a)*(W-P.l-P.r);} return P.l+(v-xmin)/(xmax-xmin)*(W-P.l-P.r); }
+  function Y(v){ return H-P.b-(v-ymin)/(ymax-ymin)*(H-P.t-P.b); }
+  var g='';
+  // gridlines + y labels
+  for(var i=0;i<=4;i++){ var yv=ymin+(ymax-ymin)*i/4, yy=Y(yv);
+    g+='<line class="gline" x1="'+P.l+'" y1="'+yy+'" x2="'+(W-P.r)+'" y2="'+yy+'"/>';
+    g+='<text x="'+(P.l-8)+'" y="'+(yy+4)+'" text-anchor="end">'+Math.round(yv)+'</text>'; }
+  // x labels
+  var xt = opts && opts.xticks ? opts.xticks : series[0].data.map(function(d){return d[0]});
+  xt.forEach(function(v){ g+='<text x="'+X(v)+'" y="'+(H-P.b+18)+'" text-anchor="middle">'+(v>=1024?(v/1024)+'K':v)+'</text>'; });
+  g+='<line class="axis" x1="'+P.l+'" y1="'+(H-P.b)+'" x2="'+(W-P.r)+'" y2="'+(H-P.b)+'"/>';
+  g+='<text x="'+(W/2)+'" y="'+(H-2)+'" text-anchor="middle" style="fill:#5a6b7e">'+(opts&&opts.xlabel||'')+'</text>';
+  // series
+  series.forEach(function(s,si){
+    var path=s.data.map(function(d,i){ return (i?'L':'M')+X(d[0]).toFixed(1)+','+Y(d[1]).toFixed(1); }).join(' ');
+    var len=1000;
+    g+='<path d="'+path+'" fill="none" stroke="'+s.color+'" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="'+len+'" stroke-dashoffset="'+len+'" class="animpath" style="transition:stroke-dashoffset 1.6s cubic-bezier(.3,.6,.2,1) '+(si*0.2)+'s"/>';
+    // area fill (subtle)
+    var area=path+' L'+X(s.data[s.data.length-1][0]).toFixed(1)+','+Y(0)+' L'+X(s.data[0][0]).toFixed(1)+','+Y(0)+' Z';
+    g+='<path d="'+area+'" fill="'+s.color+'" opacity="0.06"/>';
+    s.data.forEach(function(d){
+      g+='<circle cx="'+X(d[0]).toFixed(1)+'" cy="'+Y(d[1]).toFixed(1)+'" r="4.5" fill="'+s.color+'" stroke="#05070b" stroke-width="2" class="pt" data-tip="'+s.name+' · '+(opts&&opts.tipfmt?opts.tipfmt(d):d[0]+': <b>'+d[1]+'</b>')+'"/>';
+    });
+  });
+  svg.innerHTML=g;
+  svg.querySelectorAll('.pt').forEach(function(c){
+    c.addEventListener('mousemove',function(e){ showTip(c.dataset.tip,e.clientX,e.clientY); });
+    c.addEventListener('mouseleave',hideTip);
+  });
+  return svg;
+}
+
+lineChart('chartDecode',[
+  {name:'orchestrator',color:'#8b6dff',data:DECODE.orch},
+  {name:'coder',color:'#76b900',data:DECODE.coder}
+],{xlabel:'output tokens',tipfmt:function(d){return d[0]+' tok out: <b>'+d[1]+' tok/s</b>'}});
+
+lineChart('chartTTFT',[
+  {name:'orchestrator',color:'#8b6dff',data:TTFT.orch},
+  {name:'coder',color:'#76b900',data:TTFT.coder}
+],{logx:true,xlabel:'prompt tokens (log)',xticks:[64,512,2048,8192,16384],tipfmt:function(d){return d[0]+'-tok prompt: <b>'+d[1]+' ms</b> TTFT'}});
+
+// ---------- concurrency bars ----------
+function concBars(elId, rows, color, maxAgg){
+  var el=document.getElementById(elId); var html='';
+  rows.forEach(function(r){
+    var w=(r[1]/maxAgg*100).toFixed(1);
+    html+='<div class="cbar"><div class="n">n='+r[0]+'</div><div class="track"><div class="fill cfill" data-w="'+w+'%" style="background:linear-gradient(90deg,'+color+'aa,'+color+')"></div></div><div class="vals"><b>'+r[1]+'</b> agg · '+r[2]+'/stream</div></div>';
+  });
+  el.innerHTML=html;
+}
+concBars('concOrch', CONC.orch, '#8b6dff', 514.4);
+concBars('concCoder', CONC.coder, '#76b900', 514.4);
+
+// ---------- reveals ----------
+var io=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){
+  e.target.classList.add('in');
+  e.target.querySelectorAll('.animpath').forEach(function(p){ p.style.strokeDashoffset=0; });
+  e.target.querySelectorAll('.cfill,.cf').forEach(function(f){ f.style.width=f.dataset.w; });
+  // donuts
+  var ring=e.target.querySelector? e.target : null;
+  e.target.querySelectorAll('.ring').forEach(function(r){ animRing(r); });
+  if(e.target.classList.contains('acc')){ animRing(e.target.querySelector('.ring')); }
+}});},{threshold:.2});
+document.querySelectorAll('.reveal,.panel').forEach(function(el){ io.observe(el); });
+
+function animRing(r){
+  if(!r||r.dataset.done)return; r.dataset.done=1;
+  var pct=parseFloat(r.dataset.pct), arc=r.querySelector('.arc'), lab=r.querySelector('.pct');
+  var C=295.3, target=C*(1-pct/100);
+  arc.style.transition='stroke-dashoffset 1.4s cubic-bezier(.2,.7,.2,1)';
+  requestAnimationFrame(function(){ arc.style.strokeDashoffset=target; });
+  var t0=null;
+  function step(ts){ if(!t0)t0=ts; var p=Math.min((ts-t0)/1400,1); var e=1-Math.pow(1-p,3);
+    lab.textContent=(pct*e).toFixed(1)+'%'; if(p<1)requestAnimationFrame(step); }
+  requestAnimationFrame(step);
+}
+
+// ---------- hero counters ----------
+function animate(el){
+  var to=parseFloat(el.dataset.to), pre=el.dataset.pre||'', suf=el.dataset.suf||'';
+  var dec=(to%1!==0)?1:0, t0=null, dur=1200;
+  function step(ts){ if(!t0)t0=ts; var p=Math.min((ts-t0)/dur,1); var e=1-Math.pow(1-p,3);
+    el.textContent=pre+(to*e).toFixed(dec)+suf; if(p<1)requestAnimationFrame(step); else el.textContent=pre+to.toFixed(dec)+suf; }
+  requestAnimationFrame(step);
+}
+var hio=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ animate(e.target); hio.unobserve(e.target);} }); },{threshold:.5});
+document.querySelectorAll('.hs .v[data-to]').forEach(function(el){ hio.observe(el); });
+
+// ---------- scroll progress ----------
+addEventListener('scroll',function(){
+  var h=document.documentElement;
+  document.getElementById('prog').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight)*100)+'%';
+},{passive:true});
 </script>
 </body>
 </html>

@@ -1,0 +1,66 @@
+{
+  "coder": [
+    {
+      "prompt_approx": 64,
+      "ttft_ms": 272,
+      "completion": 96,
+      "decode_tps": 26.7
+    },
+    {
+      "prompt_approx": 512,
+      "ttft_ms": 354,
+      "completion": 96,
+      "decode_tps": 21.4
+    },
+    {
+      "prompt_approx": 2048,
+      "ttft_ms": 730,
+      "completion": 96,
+      "decode_tps": 23.3
+    },
+    {
+      "prompt_approx": 8192,
+      "ttft_ms": 1249,
+      "completion": 96,
+      "decode_tps": 23.9
+    },
+    {
+      "prompt_approx": 16384,
+      "ttft_ms": 1730,
+      "completion": 96,
+      "decode_tps": 21.8
+    }
+  ],
+  "orchestrator": [
+    {
+      "prompt_approx": 64,
+      "ttft_ms": 91,
+      "completion": 96,
+      "decode_tps": 120.3
+    },
+    {
+      "prompt_approx": 512,
+      "ttft_ms": 132,
+      "completion": 96,
+      "decode_tps": 113.3
+    },
+    {
+      "prompt_approx": 2048,
+      "ttft_ms": 262,
+      "completion": 96,
+      "decode_tps": 116.2
+    },
+    {
+      "prompt_approx": 8192,
+      "ttft_ms": 897,
+      "completion": 96,
+      "decode_tps": 112.7
+    },
+    {
+      "prompt_approx": 16384,
+      "ttft_ms": 1842,
+      "completion": 96,
+      "decode_tps": 111.9
+    }
+  ]
+}
