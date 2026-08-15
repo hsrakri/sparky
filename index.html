@@ -176,7 +176,9 @@
   .bar .val{font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
   .f-qw36{background:linear-gradient(90deg,#5a48b8,var(--qw))} .f-nemo{background:linear-gradient(90deg,#4a7a08,var(--nv))}
   .f-q38b{background:linear-gradient(90deg,#7a5cd8,#9d85f2)} .f-q38s{background:linear-gradient(90deg,var(--amber),#ffd28f)}
-  .in .w100{width:100%}.in .w44{width:44%}.in .w19{width:19.4%}.in .w10{width:10.2%}
+.f-q38m{background:linear-gradient(90deg,var(--nv),var(--nv2))}
+  .in .w100{width:100%}
+.in .w27{width:26.7%}.in .w44{width:44%}.in .w19{width:19.4%}.in .w10{width:10.2%}
   .chart .note{color:var(--dim);font-size:13px;margin-top:14px}
   .chart .note b{color:var(--amber)}
   @media(max-width:640px){.bar{grid-template-columns:1fr}.bar .lab{text-align:left}.bar .val{order:-1}}
@@ -371,7 +373,7 @@
     <h4>tokens / second · measured on this GB10</h4>
     <div class="bar"><div class="lab">Qwen3.6‑35B <small>MoE · 3B active · MTP</small></div><div class="track"><div class="fill f-qw36 w100"></div></div><div class="val">114</div></div>
     <div class="bar"><div class="lab">Nemotron‑3.5 30B <small>hybrid MoE · eager</small></div><div class="track"><div class="fill f-nemo w44"></div></div><div class="val">~50</div></div>
-    <div class="bar"><div class="lab">Qwen3.8‑27B + MTP‑3 <small>built‑in draft head · clean tools</small></div><div class="track"><div class="fill f-qw36 w27"></div></div><div class="val">30.4</div></div>
+    <div class="bar"><div class="lab">Qwen3.8‑27B + MTP‑3 <small>built‑in draft head · clean tools</small></div><div class="track"><div class="fill f-q38m w27"></div></div><div class="val">30.4</div></div>
     <div class="bar"><div class="lab">Qwen3.8‑27B + n‑gram <small>fast but mangles tools</small></div><div class="track"><div class="fill f-q38s w19"></div></div><div class="val">22.1</div></div>
     <div class="bar"><div class="lab">Qwen3.8‑27B <small>baseline · no spec</small></div><div class="track"><div class="fill f-q38b w10"></div></div><div class="val">11.6</div></div>
     <div class="note"><b>The fix:</b> the checkpoint ships a trained <b>MTP head</b> — enabling it (<code>method:mtp, n=3</code>) gives <b>2.6× with clean tool‑calls</b>, on our own v0.26 image, no third‑party build. n‑gram is faster‑looking but mangles tool parsing. Recipe 02 has the correction + data. Hat‑tip <a href="https://github.com/drowzeys/keys-vLLm.0.27-Qwen3.8-NVFP4-MTP3-Single-DGX-Spark">@drowzeys</a> & @eugr.</div>
