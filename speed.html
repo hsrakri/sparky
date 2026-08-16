@@ -287,6 +287,34 @@
   </div>
 </section>
 
+<!-- ================= TUNING LOG ================= -->
+<section style="background:linear-gradient(180deg,transparent,rgba(10,14,21,.55),transparent)">
+  <div class="wrap">
+    <div class="eyebrow reveal">tuning log · the honest kind</div>
+    <h2 class="reveal d1">Two experiments: one flat, one big</h2>
+    <p class="lead reveal d2">Not every knob pays off — and the ones that do aren't always the ones you'd expect. Both measured on the box, temperature 0.</p>
+    <div class="moves">
+
+      <div class="move nv reveal">
+        <div class="no">EXPERIMENT · CODER · ✗ no gain</div>
+        <h3>Bigger batch budget didn't move decode</h3>
+        <p>vLLM warned the MTP scheduler caps <code>max_num_scheduled_tokens</code> at 2048. So we raised <code>--max-num-batched-tokens</code> to 8192 and re-measured single-stream code decode. Result: statistical noise — and it ate memory headroom, so we reverted it.</p>
+        <div class="ba"><span class="from mono">27.0</span><span class="arrow">→</span><span class="to nv mono">27.7 tok/s</span><span class="mult" style="background:rgba(150,170,195,.14);color:var(--sub);border-color:var(--line)">flat · reverted</span></div>
+        <p style="font-size:13px;color:var(--dim);margin-top:12px"><b>Lesson:</b> single-stream MTP decode is already at the memory-bandwidth ceiling. The batch budget only helps <em>prefill</em> and <em>concurrency</em>, not one-request tok/s.</p>
+      </div>
+
+      <div class="move qw reveal d1">
+        <div class="no">EXPERIMENT · ORCHESTRATOR · ✓ shipped</div>
+        <h3>Turning the router's brain <em>down</em> made it better</h3>
+        <p>The literature calls it the "reasoning trap": a verbose chain-of-thought steals the attention an orchestrator needs to read requests and route. We A/B'd our orchestrator's thinking on vs off across 3 plan-and-delegate tasks.</p>
+        <div class="ba"><span class="from mono">580 tok · 5.4s</span><span class="arrow">→</span><span class="to qw mono">299 tok · 2.9s</span><span class="mult qw">2× faster</span></div>
+        <p style="font-size:13px;color:var(--dim);margin-top:12px"><b>Lesson:</b> ~half the tokens, ~46% lower latency, and delegation quality held at <b>3/3 clean</b>. Light, decisive routing beats heavy deliberation — we shipped thinking-off for the orchestrator, kept the <em>coder</em> at medium (it's the one that hallucinates).</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
 <!-- ================= THE 4 MOVES ================= -->
 <section>
   <div class="wrap">
