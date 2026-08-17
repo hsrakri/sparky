@@ -217,11 +217,11 @@
     <div class="sec-kicker">Distributed Inference · Special Report</div>
     <h2 class="headline">Two Sparks, One Million-Token Mind</h2>
     <p class="deck">One AI model too big for any single desktop supercomputer. Two machines. One very fast cable. Here's how a million-token brain came to live in a home rack — and what surprised us when it did.</p>
-    <div class="byline">By the <b>Sparky Desk</b> · Filed from the rack</div>
     <div class="topthanks">
       With grateful thanks to <a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark"><b>Mia · MiaAI-Lab</b></a>, whose DSpark recipe made this possible — and to
       <a href="https://github.com/anemll">anemll</a>, <a href="https://nacyot.github.io/artifacts/vllm-spin-wait-gb10/">nacyot</a> &amp; <a href="https://github.com/agjs/gb10-clock-cap">@pbastowski</a>, on whose GB10 work it stands.
     </div>
+    <div class="byline">By the <b>Sparky Desk</b> · Filed from the rack</div>
 
     <div class="tldr">
       <div class="th">In Brief <span class="rd">·</span> The Whole Story in 20 Seconds</div>
@@ -252,9 +252,9 @@
       <div class="schem">
         <div class="snode">
           <div class="r">Head · Rank 0 · sparky1</div>
-          <h4>GB10 — 192.168.186.14</h4>
+          <h4>GB10 · node one</h4>
           <div class="l">API server on :8888, scheduler, a 79-GiB shard of the weights.</div>
-          <div class="m">MASTER_ADDR 10.100.128.1 · util 0.835</div>
+          <div class="m">MASTER_ADDR = head's fabric IP · util 0.835</div>
         </div>
         <div class="slink">
           <div class="w">NCCL all-reduce</div>
@@ -263,9 +263,9 @@
         </div>
         <div class="snode">
           <div class="r">Worker · Rank 1 · sparky2</div>
-          <h4>GB10 — 192.168.186.15</h4>
+          <h4>GB10 · node two</h4>
           <div class="l">A headless vLLM worker holding the other 79-GiB shard.</div>
-          <div class="m">10.100.128.2 · enp1s0f0np0</div>
+          <div class="m">worker's fabric IP · enp1s0f0np0</div>
         </div>
       </div>
     </div>
@@ -279,7 +279,7 @@
 <pre><span class="cm"># DeepSeek-V4-Flash-0731 · NVFP4 · anemll dspark-vllm-gx10:0.1.1</span>
 vllm serve <span class="vl">DeepSeek-V4-Flash-0731</span> \
   <span class="fl">--tensor-parallel-size</span> <span class="vl">2</span>  <span class="fl">--nnodes</span> <span class="vl">2</span>  <span class="fl">--node-rank</span> <span class="vl">0</span> \
-  <span class="fl">--master-addr</span> <span class="vl">10.100.128.1</span>  <span class="fl">--kv-cache-dtype</span> <span class="vl">nvfp4_ds_mla</span> \
+  <span class="fl">--master-addr</span> <span class="vl">&lt;head-fabric-ip&gt;</span>  <span class="fl">--kv-cache-dtype</span> <span class="vl">nvfp4_ds_mla</span> \
   <span class="fl">--max-model-len</span> <span class="vl">1048576</span>   <span class="cm"># one million tokens</span>
   <span class="fl">--speculative-config</span> '{"method":<span class="vl">"dspark"</span>,"num_speculative_tokens":<span class="vl">5</span>}' \
   <span class="fl">--moe-backend</span> <span class="vl">flashinfer_b12x</span>  <span class="fl">--async-scheduling</span> \
