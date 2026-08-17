@@ -67,6 +67,21 @@
   .topthanks a:hover{text-decoration:underline}
   .topthanks b{color:var(--ink)}
 
+  /* ---------- TL;DR (In Brief) ---------- */
+  .tldr{max-width:70ch;margin:22px auto 0;border:2px solid var(--ink);background:var(--box);
+    box-shadow:4px 4px 0 rgba(26,24,21,.18)}
+  .tldr .th{display:flex;align-items:center;justify-content:center;gap:10px;
+    font-family:var(--head);font-weight:800;font-size:14px;letter-spacing:.22em;text-transform:uppercase;
+    padding:10px;border-bottom:1px solid var(--ink);background:var(--ink);color:var(--paper)}
+  .tldr .th .rd{color:#e8b3ae}
+  .tldr ul{list-style:none;padding:6px 0}
+  .tldr li{display:grid;grid-template-columns:34px 1fr;gap:8px;align-items:baseline;
+    padding:9px 18px 9px 14px;font-size:15.5px;line-height:1.5;border-bottom:1px solid var(--hair)}
+  .tldr li:last-child{border-bottom:none}
+  .tldr li .ic{font-family:var(--head);font-weight:800;color:var(--red);text-align:center;font-size:16px}
+  .tldr li b{color:var(--ink)}
+  .tldr li .mono2{font-family:"Courier New",monospace;font-size:.9em}
+
   /* ---------- ARTICLE COLUMNS ---------- */
   .article{padding-top:26px;padding-bottom:20px;
     column-count:3;column-gap:34px;column-rule:1px solid var(--hair);
@@ -201,17 +216,28 @@
   <div class="lead-sec">
     <div class="sec-kicker">Distributed Inference · Special Report</div>
     <h2 class="headline">Two Sparks, One Million-Token Mind</h2>
-    <p class="deck">A 156-gigabyte reasoning model — too large for any single desktop supercomputer — is split across a pair of them and stitched back together with a 200-gigabit thread. The result now answers, at home, for no cloud bill at all.</p>
+    <p class="deck">One AI model too big for any single desktop supercomputer. Two machines. One very fast cable. Here's how a million-token brain came to live in a home rack — and what surprised us when it did.</p>
     <div class="byline">By the <b>Sparky Desk</b> · Filed from the rack</div>
     <div class="topthanks">
       With grateful thanks to <a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark"><b>Mia · MiaAI-Lab</b></a>, whose DSpark recipe made this possible — and to
       <a href="https://github.com/anemll">anemll</a>, <a href="https://nacyot.github.io/artifacts/vllm-spin-wait-gb10/">nacyot</a> &amp; <a href="https://github.com/agjs/gb10-clock-cap">@pbastowski</a>, on whose GB10 work it stands.
     </div>
+
+    <div class="tldr">
+      <div class="th">In Brief <span class="rd">·</span> The Whole Story in 20 Seconds</div>
+      <ul>
+        <li><span class="ic">①</span><span><b>The problem:</b> DeepSeek-V4-Flash is a brilliant 156&nbsp;GB reasoning model with a million-token memory — too big for one 128&nbsp;GB DGX Spark.</span></li>
+        <li><span class="ic">②</span><span><b>The trick:</b> split it in half across <b>two</b> Sparks and stitch the halves together with a 200-gigabit cable, thousands of times a second. Two small machines become one big one.</span></li>
+        <li><span class="ic">③</span><span><b>Does it work?</b> Yes — <b>~37 tokens/sec</b>, warm, single stream. A home assistant now runs on it daily. Cloud bill: <b>$0</b>.</span></li>
+        <li><span class="ic">④</span><span><b>Plot twist:</b> under load, the hottest thing wasn't the GPU — it was CPU cores spinning in a wait-loop. A one-line fix freed a whole core for free.</span></li>
+        <li><span class="ic">⑤</span><span><b>Pro tip:</b> never download 156&nbsp;GB twice. Pull once, copy to the second machine over that same fast cable at ~690&nbsp;MB/s.</span></li>
+      </ul>
+    </div>
   </div>
 
   <!-- ============ ARTICLE ============ -->
   <div class="article">
-    <p class="first">In a home lab that runs on ordinary wall current, two NVIDIA DGX Spark computers now share a single mind. Each holds a GB10 chip and 128 gigabytes of memory; neither, alone, can comfortably seat DeepSeek-V4-Flash-0731 — a mixture-of-experts reasoning model whose weights fill 156 gigabytes and whose context window stretches to a full million tokens. So the model was cleaved in two.</p>
+    <p class="first">In a home lab running on ordinary wall current, two NVIDIA DGX Spark computers now share a single mind. Each one has 128 gigabytes of memory. The model they wanted to run — DeepSeek-V4-Flash, a reasoning engine whose weights alone fill 156 gigabytes and whose memory stretches to a million tokens — fits in neither. The solution was as old as it is satisfying: cut the thing in half.</p>
     <p>Rank zero sits on the machine called <em>sparky1</em>; rank one on <em>sparky2</em>. Every layer's arithmetic is divided across the two graphics processors, and the partial results are reconciled many thousands of times a second over a dedicated 200-gigabit ConnectX link — a private thread of copper and light that never touches the household network.</p>
     <p>Loaded, each processor carries roughly 79 gigabytes. Together the pair pools 256 gigabytes of unified memory, enough to hold both the enormous checkpoint and the million-token cache that gives the model its long memory. It is, in effect, one large accelerator assembled from two small ones.</p>
 
