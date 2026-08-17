@@ -59,6 +59,13 @@
     text-transform:uppercase;color:var(--faint);margin:18px auto 0;
     padding:10px 0;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);max-width:44ch}
   .byline b{color:var(--ink)}
+  .topthanks{max-width:64ch;margin:14px auto 0;text-align:center;font-family:var(--serif);font-style:italic;
+    font-size:15px;line-height:1.5;color:var(--sub);
+    border:1px solid var(--hair);border-left:3px solid var(--red);border-right:3px solid var(--red);
+    padding:12px 20px;background:var(--box)}
+  .topthanks a{color:var(--red);border:none;font-style:normal}
+  .topthanks a:hover{text-decoration:underline}
+  .topthanks b{color:var(--ink)}
 
   /* ---------- ARTICLE COLUMNS ---------- */
   .article{padding-top:26px;padding-bottom:20px;
@@ -141,6 +148,25 @@
   .tag-pending{font-family:var(--head);font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
     color:var(--red);border:1px solid var(--red);padding:1px 7px;border-radius:2px;white-space:nowrap}
 
+  /* ---------- CHARTS (engraving style) ---------- */
+  .charts{column-span:all;margin:22px 0}
+  .chartrow{display:grid;grid-template-columns:1fr 1fr;border:2px solid var(--ink);background:var(--box)}
+  .chartrow+.chartrow{border-top:none}
+  .chartcell{padding:16px 18px 14px;border-right:1px solid var(--ink)}
+  .chartcell:last-child{border-right:none}
+  .chartcell h5{font-family:var(--head);font-weight:800;font-size:14px;letter-spacing:.02em}
+  .chartcell .fno{font-family:var(--head);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:700}
+  .chartcell .cs{font-size:11.5px;font-style:italic;color:var(--faint);margin:1px 0 8px}
+  .chartcell svg{width:100%;height:auto;display:block}
+  .clegend{display:flex;gap:15px;flex-wrap:wrap;font-family:var(--head);font-size:10.5px;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--sub);margin-top:6px}
+  .clegend i{display:inline-block;width:15px;height:10px;margin-right:5px;vertical-align:-1px;border:1px solid var(--ink)}
+  svg .axis{stroke:var(--ink);stroke-width:1.2;fill:none}
+  svg .grid{stroke:rgba(26,24,21,.14);stroke-width:1}
+  svg .lbl{font-family:"Times New Roman",Georgia,serif;font-size:10px;fill:var(--faint)}
+  svg .vlbl{font-family:"Courier New",monospace;font-size:10px;fill:var(--ink);font-weight:700}
+  @media(max-width:620px){.chartrow{grid-template-columns:1fr}.chartcell{border-right:none;border-bottom:1px solid var(--ink)}.chartcell:last-child{border-bottom:none}}
+
   @media(max-width:900px){ .article{column-count:2} }
   @media(max-width:620px){
     .article,.art-narrow{column-count:1}
@@ -176,7 +202,11 @@
     <div class="sec-kicker">Distributed Inference · Special Report</div>
     <h2 class="headline">Two Sparks, One Million-Token Mind</h2>
     <p class="deck">A 156-gigabyte reasoning model — too large for any single desktop supercomputer — is split across a pair of them and stitched back together with a 200-gigabit thread. The result now answers, at home, for no cloud bill at all.</p>
-    <div class="byline">By the <b>Sparky Desk</b> · Filed from the rack · Built on <b>MiaAI-Lab</b>'s recipe</div>
+    <div class="byline">By the <b>Sparky Desk</b> · Filed from the rack</div>
+    <div class="topthanks">
+      With grateful thanks to <a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark"><b>Mia · MiaAI-Lab</b></a>, whose DSpark recipe made this possible — and to
+      <a href="https://github.com/anemll">anemll</a>, <a href="https://nacyot.github.io/artifacts/vllm-spin-wait-gb10/">nacyot</a> &amp; <a href="https://github.com/agjs/gb10-clock-cap">@pbastowski</a>, on whose GB10 work it stands.
+    </div>
   </div>
 
   <!-- ============ ARTICLE ============ -->
@@ -253,6 +283,41 @@ vllm serve <span class="vl">DeepSeek-V4-Flash-0731</span> \
       </div>
     </div>
 
+    <div class="charts">
+      <div class="chartrow">
+        <div class="chartcell">
+          <div class="fno">Fig. 3</div>
+          <h5>The core that stopped spinning</h5>
+          <div class="cs">vLLM container CPU %, six concurrent streams — before &amp; after the spin-wait fix</div>
+          <svg id="cCpu" viewBox="0 0 300 190"></svg>
+          <div class="clegend"><span><i style="background:var(--ink)"></i>before · busy_loop 1s</span><span><i style="background:var(--red)"></i>after · 0.002s</span></div>
+        </div>
+        <div class="chartcell">
+          <div class="fno">Fig. 4</div>
+          <h5>Heat under six streams</h5>
+          <div class="cs">SoC temperature °C over ~24 s of sustained load — head runs hotter</div>
+          <svg id="cHeat" viewBox="0 0 300 190"></svg>
+          <div class="clegend"><span><i style="background:var(--ink)"></i>sparky1 · head</span><span><i style="background:var(--red)"></i>sparky2 · worker</span></div>
+        </div>
+      </div>
+      <div class="chartrow">
+        <div class="chartcell">
+          <div class="fno">Fig. 5</div>
+          <h5>Decode, warm vs. cold</h5>
+          <div class="cs">single-stream tok/s — the graphs pay for themselves after one request</div>
+          <svg id="cDec" viewBox="0 0 300 190"></svg>
+          <div class="clegend"><span><i style="background:var(--red)"></i>tokens / second</span></div>
+        </div>
+        <div class="chartcell">
+          <div class="fno">Fig. 6</div>
+          <h5>Why one Spark won't do</h5>
+          <div class="cs">GiB resident per GPU of ~121 available — the model needs both</div>
+          <svg id="cMem" viewBox="0 0 300 190"></svg>
+          <div class="clegend"><span><i style="background:var(--ink)"></i>79 GiB shard</span><span><i style="background:transparent"></i>free headroom</span></div>
+        </div>
+      </div>
+    </div>
+
     <div class="subhead"><span>What We Pushed Further</span></div>
     <p class="first">The recipe's achievement — a 1M-context DeepSeek that runs on GB10 at all — belongs to its authors. What follows is what this bureau added on top, reported plainly, including the improvement that barely moved the needle.</p>
 
@@ -271,7 +336,8 @@ vllm serve <span class="vl">DeepSeek-V4-Flash-0731</span> \
     <div class="thanks">
       <div class="th">With Thanks</div>
       <div class="rows">
-        <div class="rw"><div class="n"><a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark">Mia · MiaAI-Lab</a></div><div class="d">The DSpark 2× DGX Spark recipe and GB10-tuned image with the DeepSeek-V4 hotfixes — the backbone of this deploy. Thank you, Mia.</div></div>
+        <div class="rw"><div class="n"><a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark">Mia · MiaAI-Lab</a></div><div class="d">The DSpark 2× DGX Spark recipe with the DeepSeek-V4 hotfixes — the backbone of this deploy. Thank you, Mia.</div></div>
+        <div class="rw"><div class="n"><a href="https://github.com/anemll">anemll</a></div><div class="d">The GB10-tuned <code>dspark-vllm-gx10</code> runtime image that makes DeepSeek-V4 serve on Grace-Blackwell at all.</div></div>
         <div class="rw"><div class="n"><a href="https://nacyot.github.io/artifacts/vllm-spin-wait-gb10/">nacyot</a></div><div class="d">The spin-wait analysis: that idle CPU cores, not the GPU, are the thermal limiter on an integrated Grace-Blackwell SoC.</div></div>
         <div class="rw"><div class="n"><a href="https://github.com/agjs/gb10-clock-cap">@pbastowski · gb10-clock-cap</a></div><div class="d">The GPU clock-cap lever at the efficiency knee — watts and heat bought down with negligible decode cost.</div></div>
         <div class="rw"><div class="n"><a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731">DeepSeek</a></div><div class="d">DeepSeek-V4-Flash-0731 — the reasoning MoE, its NVFP4 checkpoint, and the trained speculative-decode head that make it all fit.</div></div>
@@ -294,6 +360,75 @@ vllm serve <span class="vl">DeepSeek-V4-Flash-0731</span> \
 </div><!-- /sheet -->
 
 <script>
+(function(){
+  var INK='#1a1815', RED='#9c281f';
+  function el(id){return document.getElementById(id);}
+
+  // Fig 3 — grouped bars, CPU % before/after
+  (function(){
+    var s=el('cCpu'); if(!s)return;
+    var P={l:34,r:290,t:14,b:156}, ymax=400, g='';
+    for(var i=0;i<=4;i++){ var v=ymax*i/4, y=P.b-(v/ymax)*(P.b-P.t);
+      g+='<line class="grid" x1="'+P.l+'" y1="'+y+'" x2="'+P.r+'" y2="'+y+'"/>';
+      g+='<text class="lbl" x="'+(P.l-5)+'" y="'+(y+3)+'" text-anchor="end">'+v+'%</text>'; }
+    g+='<line class="axis" x1="'+P.l+'" y1="'+P.t+'" x2="'+P.l+'" y2="'+P.b+'"/><line class="axis" x1="'+P.l+'" y1="'+P.b+'" x2="'+P.r+'" y2="'+P.b+'"/>';
+    function bar(x,v,c){ var h=(v/ymax)*(P.b-P.t), y=P.b-h;
+      return '<rect x="'+x+'" y="'+y+'" width="34" height="'+h+'" fill="'+c+'" stroke="#1a1815" stroke-width="1"/>'+
+             '<text class="vlbl" x="'+(x+17)+'" y="'+(y-4)+'" text-anchor="middle">'+v+'</text>'; }
+    [{x:108,l:'Head',b:377,a:281},{x:216,l:'Worker',b:276,a:276}].forEach(function(gr){
+      g+=bar(gr.x-38,gr.b,INK)+bar(gr.x+4,gr.a,RED);
+      g+='<text class="lbl" x="'+gr.x+'" y="'+(P.b+15)+'" text-anchor="middle" style="font-size:11px;fill:#1a1815">'+gr.l+'</text>'; });
+    s.innerHTML=g;
+  })();
+
+  // Fig 4 — line chart, SoC temp over load
+  (function(){
+    var s=el('cHeat'); if(!s)return;
+    var P={l:34,r:288,t:14,b:150}, ymin=45,ymax=90, xs=[45,126,207,288], xl=['6s','12s','18s','24s'], g='';
+    function Y(v){return P.b-(v-ymin)/(ymax-ymin)*(P.b-P.t);}
+    [45,60,75,90].forEach(function(v){ var y=Y(v);
+      g+='<line class="grid" x1="'+P.l+'" y1="'+y+'" x2="'+P.r+'" y2="'+y+'"/>';
+      g+='<text class="lbl" x="'+(P.l-5)+'" y="'+(y+3)+'" text-anchor="end">'+v+'°</text>'; });
+    g+='<line class="axis" x1="'+P.l+'" y1="'+P.t+'" x2="'+P.l+'" y2="'+P.b+'"/><line class="axis" x1="'+P.l+'" y1="'+P.b+'" x2="'+P.r+'" y2="'+P.b+'"/>';
+    xs.forEach(function(x,i){ g+='<text class="lbl" x="'+x+'" y="'+(P.b+14)+'" text-anchor="middle">'+xl[i]+'</text>'; });
+    function line(d,c){ var p=d.map(function(v,i){return (i?'L':'M')+xs[i]+','+Y(v).toFixed(1);}).join(' ');
+      var o='<path d="'+p+'" fill="none" stroke="'+c+'" stroke-width="2.4"/>';
+      d.forEach(function(v,i){o+='<circle cx="'+xs[i]+'" cy="'+Y(v).toFixed(1)+'" r="3.2" fill="'+c+'" stroke="#f7f3ea" stroke-width="1.2"/>';}); return o; }
+    g+=line([71,83,86,83],INK)+line([59,64,67,65],RED);
+    s.innerHTML=g;
+  })();
+
+  // Fig 5 — decode bars
+  (function(){
+    var s=el('cDec'); if(!s)return;
+    var P={l:34,r:288,t:14,b:150}, ymax=45, g='';
+    [0,15,30,45].forEach(function(v){ var y=P.b-(v/ymax)*(P.b-P.t);
+      g+='<line class="grid" x1="'+P.l+'" y1="'+y+'" x2="'+P.r+'" y2="'+y+'"/>';
+      g+='<text class="lbl" x="'+(P.l-5)+'" y="'+(y+3)+'" text-anchor="end">'+v+'</text>'; });
+    g+='<line class="axis" x1="'+P.l+'" y1="'+P.t+'" x2="'+P.l+'" y2="'+P.b+'"/><line class="axis" x1="'+P.l+'" y1="'+P.b+'" x2="'+P.r+'" y2="'+P.b+'"/>';
+    [{x:110,v:37,c:RED,l:'warm (best 38)'},{x:210,v:8.1,c:INK,l:'cold 1st'}].forEach(function(b){
+      var h=(b.v/ymax)*(P.b-P.t), y=P.b-h;
+      g+='<rect x="'+(b.x-32)+'" y="'+y+'" width="64" height="'+h+'" fill="'+b.c+'" stroke="#1a1815" stroke-width="1"/>';
+      g+='<text class="vlbl" x="'+b.x+'" y="'+(y-4)+'" text-anchor="middle">'+b.v+'</text>';
+      g+='<text class="lbl" x="'+b.x+'" y="'+(P.b+14)+'" text-anchor="middle" style="font-size:11px;fill:#1a1815">'+b.l+'</text>'; });
+    s.innerHTML=g;
+  })();
+
+  // Fig 6 — memory per node (horizontal)
+  (function(){
+    var s=el('cMem'); if(!s)return;
+    var g='<defs><pattern id="hatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse"><line x1="0" y1="0" x2="0" y2="6" stroke="#1a1815" stroke-width="1" opacity="0.45"/></pattern></defs>';
+    var x0=66, totW=212, total=121, used=79, uw=used/total*totW;
+    [{y:42,l:'sparky1'},{y:104,l:'sparky2'}].forEach(function(r){
+      g+='<text class="lbl" x="'+(x0-6)+'" y="'+(r.y+24)+'" text-anchor="end" style="font-size:11px;fill:#1a1815">'+r.l+'</text>';
+      g+='<rect x="'+x0+'" y="'+r.y+'" width="'+totW+'" height="38" fill="url(#hatch)" stroke="#1a1815" stroke-width="1.4"/>';
+      g+='<rect x="'+x0+'" y="'+r.y+'" width="'+uw.toFixed(1)+'" height="38" fill="#1a1815"/>';
+      g+='<text class="vlbl" x="'+(x0+uw/2)+'" y="'+(r.y+23)+'" text-anchor="middle" fill="#f7f3ea">79 GiB</text>';
+      g+='<text class="lbl" x="'+(x0+totW-6)+'" y="'+(r.y+23)+'" text-anchor="end">of 121</text>'; });
+    s.innerHTML=g;
+  })();
+})();
+
 addEventListener('scroll',function(){
   var h=document.documentElement;
   document.getElementById('prog').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight)*100)+'%';
