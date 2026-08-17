@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Spark Dispatch — Two Sparks, One Million-Token Mind</title>
+<meta name="description" content="A broadsheet report from the home lab: DeepSeek-V4-Flash-0731 run tensor-parallel across two NVIDIA DGX Spark GB10s over a 200-gigabit fabric — 1M context, NVFP4, DSpark speculative decode. Every number measured.">
+<meta property="og:title" content="The Spark Dispatch — Two Sparks, One Million-Token Mind">
+<meta property="og:description" content="A 156-gigabyte reasoning model, split across two desktop supercomputers and stitched together with a 200-gigabit thread. Filed from the rack.">
+<meta property="og:type" content="article">
+<style>
+  :root{
+    --paper:#f4efe4; --paper2:#ece5d5; --box:#f7f3ea;
+    --ink:#1a1815; --sub:#413e37; --faint:#726d61;
+    --red:#9c281f; --green:#3f6b1a;
+    --rule:#1a1815; --hair:rgba(26,24,21,.22);
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --head:"Times New Roman",Georgia,"Iowan Old Style",serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:#d9d2c2;color:var(--ink);font-family:var(--serif);line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(rgba(0,0,0,.015) 1px,transparent 1px);background-size:3px 3px;}
+  #prog{position:fixed;top:0;left:0;height:3px;width:0;z-index:99;background:var(--red);transition:width .1s linear}
+  .sheet{max-width:1120px;margin:0 auto;background:var(--paper);
+    box-shadow:0 0 60px rgba(0,0,0,.35);
+    background-image:linear-gradient(rgba(120,110,90,.035),rgba(120,110,90,.035));}
+  .pad{padding:0 clamp(18px,4.4vw,58px)}
+  a{color:inherit;text-decoration:none;border-bottom:1px solid var(--hair)}
+  a:hover{color:var(--red);border-color:var(--red)}
+  code{font-family:"Courier New",ui-monospace,monospace;font-size:.86em;
+    background:rgba(26,24,21,.06);padding:.05em .35em;border:1px solid var(--hair);border-radius:2px}
+
+  /* ---------- MASTHEAD ---------- */
+  .flag-top{display:flex;justify-content:space-between;align-items:center;
+    font-family:var(--head);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--sub);border-bottom:1px solid var(--ink);padding:9px 0 8px}
+  .flag-top .c{color:var(--red);font-weight:700}
+  .masthead{text-align:center;padding:16px 0 8px;border-bottom:3px double var(--ink)}
+  .masthead h1{font-family:var(--head);font-weight:800;letter-spacing:.02em;
+    font-size:clamp(42px,9vw,104px);line-height:.94;text-transform:uppercase}
+  .masthead .kicker-top{font-family:var(--head);font-size:12px;letter-spacing:.42em;
+    text-transform:uppercase;color:var(--sub);margin-bottom:8px}
+  .dateline-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;
+    font-family:var(--head);font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--sub);padding:7px 0;border-bottom:1px solid var(--ink)}
+  .dateline-bar .mid{color:var(--red);font-style:italic;letter-spacing:.04em;text-transform:none;font-size:13px}
+
+  /* ---------- HEADLINE BLOCK ---------- */
+  .lead-sec{padding-top:26px;padding-bottom:10px}
+  .sec-kicker{font-family:var(--head);font-size:13px;letter-spacing:.24em;text-transform:uppercase;
+    color:var(--red);text-align:center;font-weight:700;margin-bottom:12px}
+  .headline{font-family:var(--head);font-weight:800;text-align:center;line-height:1.02;
+    font-size:clamp(34px,6.4vw,72px);letter-spacing:-.005em;max-width:15ch;margin:0 auto}
+  .deck{font-family:var(--serif);font-style:italic;text-align:center;color:var(--sub);
+    font-size:clamp(17px,2.3vw,23px);line-height:1.4;max-width:60ch;margin:16px auto 0}
+  .byline{text-align:center;font-family:var(--head);font-size:12.5px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--faint);margin:18px auto 0;
+    padding:10px 0;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);max-width:44ch}
+  .byline b{color:var(--ink)}
+
+  /* ---------- ARTICLE COLUMNS ---------- */
+  .article{padding-top:26px;padding-bottom:20px;
+    column-count:3;column-gap:34px;column-rule:1px solid var(--hair);
+    text-align:justify;hyphens:auto;font-size:16.5px;line-height:1.62}
+  .article p{margin:0 0 2px;text-indent:1.3em}
+  .article p.first{text-indent:0}
+  .article p.first::first-letter{float:left;font-family:var(--head);font-weight:800;
+    font-size:5.4em;line-height:.78;padding:.02em .09em 0 0;color:var(--red)}
+  .subhead{column-span:all;font-family:var(--head);font-weight:800;text-transform:uppercase;
+    letter-spacing:.03em;font-size:20px;text-align:center;margin:24px 0 12px;
+    padding-top:12px;border-top:1px solid var(--ink);position:relative}
+  .subhead span{background:var(--paper);padding:0 14px;position:relative;top:-24px;display:inline-block;margin-bottom:-18px}
+  .article strong{font-weight:700}
+  .art-narrow{column-count:2}
+
+  /* pull quote */
+  .pull{column-span:all;text-align:center;font-family:var(--head);font-style:italic;
+    font-size:clamp(22px,3.2vw,32px);line-height:1.25;color:var(--ink);
+    max-width:26ch;margin:22px auto;padding:16px 0;
+    border-top:2px solid var(--ink);border-bottom:2px solid var(--ink)}
+  .pull small{display:block;font-style:normal;font-family:var(--head);font-size:12px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--red);margin-top:10px}
+
+  /* ---------- BOX SCORE (data table) ---------- */
+  .boxwrap{column-span:all;margin:20px 0}
+  .box{background:var(--box);border:2px solid var(--ink);padding:0}
+  .box .bh{border-bottom:1px solid var(--ink);padding:12px 18px;text-align:center}
+  .box .bh .t{font-family:var(--head);font-weight:800;text-transform:uppercase;letter-spacing:.1em;font-size:18px}
+  .box .bh .s{font-family:var(--head);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-top:3px}
+  table{width:100%;border-collapse:collapse;font-size:14.5px}
+  table.overflow{display:block;overflow-x:auto}
+  th,td{padding:9px 16px;text-align:left;border-bottom:1px solid var(--hair)}
+  th{font-family:var(--head);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-weight:700}
+  td.num{text-align:right;font-family:"Courier New",monospace;font-variant-numeric:tabular-nums}
+  td .fig{font-weight:700}
+  td .g{color:var(--green);font-weight:700} td .r{color:var(--red);font-weight:700}
+  tr:last-child td{border-bottom:none}
+  .box .foot{border-top:1px solid var(--ink);padding:8px 16px;font-size:11.5px;font-style:italic;color:var(--faint);text-align:center}
+
+  /* figure box (code / diagram) */
+  .fig-box{column-span:all;margin:22px 0;border:1px solid var(--ink);background:var(--box)}
+  .fig-box .cap{border-bottom:1px solid var(--ink);padding:9px 16px;font-family:var(--head);
+    font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--sub);display:flex;justify-content:space-between;gap:10px}
+  .fig-box .cap b{color:var(--red)}
+  pre{padding:16px 18px;font-family:"Courier New",ui-monospace,monospace;font-size:12.5px;
+    line-height:1.7;color:var(--ink);overflow-x:auto;white-space:pre;background:repeating-linear-gradient(transparent,transparent 27px,rgba(26,24,21,.04) 27px,rgba(26,24,21,.04) 28px)}
+  pre .fl{color:var(--red)} pre .vl{color:var(--green);font-weight:700} pre .cm{color:var(--faint);font-style:italic}
+
+  /* schematic */
+  .schem{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;padding:18px}
+  .snode{flex:1;min-width:210px;border:1px solid var(--ink);padding:16px;background:var(--paper)}
+  .snode .r{font-family:var(--head);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--red)}
+  .snode h4{font-family:var(--head);font-size:17px;margin:4px 0 6px}
+  .snode .l{font-size:13px;color:var(--sub);line-height:1.45}
+  .snode .m{font-family:"Courier New",monospace;font-size:11px;color:var(--faint);margin-top:8px}
+  .slink{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;min-width:130px}
+  .slink .w{font-family:var(--head);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);text-align:center}
+  .slink .bar{width:100%;height:2px;background:var(--ink);margin:8px 0;position:relative;overflow:hidden}
+  .slink .bar::after{content:"";position:absolute;top:0;bottom:0;width:30%;background:var(--red);animation:zip 1.5s linear infinite}
+  @keyframes zip{from{left:-30%}to{left:100%}}
+
+  /* thanks */
+  .thanks{column-span:all;margin:22px 0 6px;border:2px solid var(--ink);background:var(--box)}
+  .thanks .th{text-align:center;font-family:var(--head);font-weight:800;text-transform:uppercase;letter-spacing:.12em;
+    font-size:15px;padding:11px;border-bottom:1px solid var(--ink)}
+  .thanks .rows{display:grid;grid-template-columns:1fr 1fr}
+  .thanks .rw{padding:14px 18px;border-bottom:1px solid var(--hair)}
+  .thanks .rw:nth-child(odd){border-right:1px solid var(--hair)}
+  .thanks .rw .n{font-family:var(--head);font-weight:700;font-size:15px}
+  .thanks .rw .n a{color:var(--red);border:none} .thanks .rw .n a:hover{text-decoration:underline}
+  .thanks .rw .d{font-size:13px;color:var(--sub);margin-top:3px;line-height:1.4}
+
+  /* colophon */
+  .colophon{border-top:3px double var(--ink);text-align:center;padding:22px 0 40px;
+    font-family:var(--head);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .colophon a{color:var(--red);border:none;font-weight:700}
+  .colophon .row{margin-top:12px;display:inline-flex;gap:20px;flex-wrap:wrap;justify-content:center}
+
+  .tag-pending{font-family:var(--head);font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--red);border:1px solid var(--red);padding:1px 7px;border-radius:2px;white-space:nowrap}
+
+  @media(max-width:900px){ .article{column-count:2} }
+  @media(max-width:620px){
+    .article,.art-narrow{column-count:1}
+    .thanks .rows{grid-template-columns:1fr}
+    .thanks .rw:nth-child(odd){border-right:none}
+    .schem{flex-direction:column}
+  }
+</style>
+</head>
+<body>
+<div id="prog"></div>
+<div class="sheet">
+<div class="pad">
+
+  <!-- ============ MASTHEAD ============ -->
+  <div class="flag-top">
+    <span>Vol. II · No. 4</span>
+    <span class="c">The Home-Lab Bureau</span>
+    <span>Price: $0.00 / cloud-free</span>
+  </div>
+  <div class="masthead">
+    <div class="kicker-top">Recipes &amp; Overnight Benchmarks from the Rack</div>
+    <h1>The Spark Dispatch</h1>
+  </div>
+  <div class="dateline-bar">
+    <span>Dual DGX Spark Edition</span>
+    <span class="mid">"Every number measured, every crash documented."</span>
+    <span>GB10 · sm_121a · aarch64</span>
+  </div>
+
+  <!-- ============ HEADLINE ============ -->
+  <div class="lead-sec">
+    <div class="sec-kicker">Distributed Inference · Special Report</div>
+    <h2 class="headline">Two Sparks, One Million-Token Mind</h2>
+    <p class="deck">A 156-gigabyte reasoning model — too large for any single desktop supercomputer — is split across a pair of them and stitched back together with a 200-gigabit thread. The result now answers, at home, for no cloud bill at all.</p>
+    <div class="byline">By the <b>Sparky Desk</b> · Filed from the rack · Built on <b>MiaAI-Lab</b>'s recipe</div>
+  </div>
+
+  <!-- ============ ARTICLE ============ -->
+  <div class="article">
+    <p class="first">In a home lab that runs on ordinary wall current, two NVIDIA DGX Spark computers now share a single mind. Each holds a GB10 chip and 128 gigabytes of memory; neither, alone, can comfortably seat DeepSeek-V4-Flash-0731 — a mixture-of-experts reasoning model whose weights fill 156 gigabytes and whose context window stretches to a full million tokens. So the model was cleaved in two.</p>
+    <p>Rank zero sits on the machine called <em>sparky1</em>; rank one on <em>sparky2</em>. Every layer's arithmetic is divided across the two graphics processors, and the partial results are reconciled many thousands of times a second over a dedicated 200-gigabit ConnectX link — a private thread of copper and light that never touches the household network.</p>
+    <p>Loaded, each processor carries roughly 79 gigabytes. Together the pair pools 256 gigabytes of unified memory, enough to hold both the enormous checkpoint and the million-token cache that gives the model its long memory. It is, in effect, one large accelerator assembled from two small ones.</p>
+
+    <div class="pull">"The hottest thing in the rack wasn't the GPU."<small>— A finding, confirmed under load</small></div>
+
+    <div class="subhead"><span>The Machine</span></div>
+    <p class="first">The hardware reads like a contradiction: a supercomputer topology on a desk. Two Grace-Blackwell GB10 modules, each a Grace CPU and a Blackwell GPU fused on one die, linked by a fabric normally found in data centres.</p>
+    <p>That fabric is not decoration. In a tensor-parallel arrangement the interconnect is the true bottleneck, and buying it down is the entire point of the second machine. The all-reduce that meets after every layer rides RoCEv2 on adapter <code>rocep1s0f0</code>, and the household's slow one-gigabit management wire is kept well clear of it.</p>
+
+    <div class="fig-box">
+      <div class="cap"><span>Figure 1 — The two-node topology</span><span><b>TP=2</b> · one model, two nodes</span></div>
+      <div class="schem">
+        <div class="snode">
+          <div class="r">Head · Rank 0 · sparky1</div>
+          <h4>GB10 — 192.168.186.14</h4>
+          <div class="l">API server on :8888, scheduler, a 79-GiB shard of the weights.</div>
+          <div class="m">MASTER_ADDR 10.100.128.1 · util 0.835</div>
+        </div>
+        <div class="slink">
+          <div class="w">NCCL all-reduce</div>
+          <div class="bar"></div>
+          <div class="w">200 Gb RoCE · GID 3</div>
+        </div>
+        <div class="snode">
+          <div class="r">Worker · Rank 1 · sparky2</div>
+          <h4>GB10 — 192.168.186.15</h4>
+          <div class="l">A headless vLLM worker holding the other 79-GiB shard.</div>
+          <div class="m">10.100.128.2 · enp1s0f0np0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="subhead"><span>The Stack</span></div>
+    <p class="first">The engine is <a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark">MiaAI-Lab's DSpark build</a> — a vLLM tuned for GB10 with the DeepSeek-V4 fixes already applied. It serves NVFP4 weights, a compact <code>nvfp4_ds_mla</code> key-value cache, and DeepSeek's own speculative-decode head, which drafts five tokens ahead of each verified step.</p>
+    <p>A single command, issued on the head, brings up both nodes; the head simply reaches across the fabric and starts the worker's container itself.</p>
+
+    <div class="fig-box">
+      <div class="cap"><span>Figure 2 — The serving command</span><span><b>:8888</b> · OpenAI-compatible</span></div>
+<pre><span class="cm"># DeepSeek-V4-Flash-0731 · NVFP4 · anemll dspark-vllm-gx10:0.1.1</span>
+vllm serve <span class="vl">DeepSeek-V4-Flash-0731</span> \
+  <span class="fl">--tensor-parallel-size</span> <span class="vl">2</span>  <span class="fl">--nnodes</span> <span class="vl">2</span>  <span class="fl">--node-rank</span> <span class="vl">0</span> \
+  <span class="fl">--master-addr</span> <span class="vl">10.100.128.1</span>  <span class="fl">--kv-cache-dtype</span> <span class="vl">nvfp4_ds_mla</span> \
+  <span class="fl">--max-model-len</span> <span class="vl">1048576</span>   <span class="cm"># one million tokens</span>
+  <span class="fl">--speculative-config</span> '{"method":<span class="vl">"dspark"</span>,"num_speculative_tokens":<span class="vl">5</span>}' \
+  <span class="fl">--moe-backend</span> <span class="vl">flashinfer_b12x</span>  <span class="fl">--async-scheduling</span> \
+  <span class="fl">--gpu-memory-utilization</span> <span class="vl">0.835</span></pre>
+    </div>
+
+    <div class="subhead"><span>By the Numbers</span></div>
+    <p class="first">Warm and unhurried, a single request streams at about 37 tokens a second — remarkable for a 156-gigabyte reasoning model that is sharded over a network cable while holding a million-token window open. The first cold request, before the compute graphs settle, limps in at eight.</p>
+    <p>But the measurement that surprised us came under load, and it was not about the graphics chip at all.</p>
+
+    <div class="boxwrap">
+      <div class="box">
+        <div class="bh"><div class="t">The Box Score</div><div class="s">Measured on the cluster · temperature 0.3 · 6 concurrent streams under load</div></div>
+        <table class="overflow">
+          <thead><tr><th>Reading</th><th style="text-align:right">Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Decode, single stream (warm)</td><td class="num"><span class="fig">~37</span> tok/s</td><td>best 38, incl. time-to-first-token</td></tr>
+            <tr><td>Decode, first cold request</td><td class="num">8.1 tok/s</td><td>graphs still warming</td></tr>
+            <tr><td>Weights per GPU</td><td class="num">79 GiB</td><td>156 GB checkpoint, halved</td></tr>
+            <tr><td>Fabric copy, node → node</td><td class="num"><span class="g">~690</span> MB/s</td><td>200 Gb RoCE, provisioning</td></tr>
+            <tr><td>vLLM CPU, head — idle</td><td class="num">3.4%</td><td>quiet</td></tr>
+            <tr><td>vLLM CPU, head — under load</td><td class="num"><span class="r">377%</span></td><td>≈ 4 cores spinning</td></tr>
+            <tr><td>SoC temperature, head — load</td><td class="num"><span class="r">86 °C</span></td><td>GPU only ~42 W / 66 °C</td></tr>
+          </tbody>
+        </table>
+        <div class="foot">The GPUs sipped ~42 W (head) and ~34 W (worker) — yet the package ran hot. The culprit was the processor, not the accelerator.</div>
+      </div>
+    </div>
+
+    <div class="subhead"><span>What We Pushed Further</span></div>
+    <p class="first">The recipe's achievement — a 1M-context DeepSeek that runs on GB10 at all — belongs to its authors. What follows is what this bureau added on top, reported plainly, including the improvement that barely moved the needle.</p>
+
+    <p><strong>Download once, copy over the fabric.</strong> The obvious path pulls the 156-gigabyte checkpoint on both machines — some 800 gigabytes of internet over a run's life. Instead it was fetched once on the head and sent to the worker over the 200-gigabit link at roughly 690 megabytes a second. The container image travelled the same way, streamed node-to-node with <code>docker save</code>; a digest re-pin fetched only the manifest, so not one layer was downloaded twice.</p>
+
+    <p><strong>The spinning cores.</strong> Following <a href="https://nacyot.github.io/artifacts/vllm-spin-wait-gb10/">nacyot's analysis</a>, vLLM's shared-memory message queue was found to spin for a full second before yielding — and during decode, with messages arriving every few milliseconds, it never yielded at all. A one-line change (<code>busy_loop_s → 0.002</code>) was baked into the launch and the same load re-run. The head shed a full CPU core, from 377 percent to 281, at no cost to throughput. Modest here — this configuration already runs an asynchronous scheduler — but a free core is a free core, and the head shares that silicon with the agent.</p>
+
+    <p><strong>The clock at the knee.</strong> <span class="tag-pending">Measuring</span> A second thermal lever, from <a href="https://github.com/agjs/gb10-clock-cap">@pbastowski's gb10-clock-cap</a>, pins the GPU at 2,200 megahertz — its efficiency knee — for a large cut in watts and heat at almost no decode cost, since single-stream decode is bound by memory bandwidth. The spin-wait fix cools the processor; the clock cap cools the accelerator; the two stack. On-cluster before-and-after figures are the next entry for this column.</p>
+
+    <p><strong>And it earns its keep.</strong> The cluster is not a benchmark rig. It is the brain of a home assistant named Kaaval, an agent lately repointed from a two-model Qwen stack to this single, stronger endpoint. Asked what it runs on, it now answers without prompting: "DeepSeek-V4-Flash-0731, tensor-parallel across your two-node DGX Spark cluster." One reasoning model fills every role the two smaller ones used to divide between them.</p>
+
+    <div class="subhead"><span>How To Run It</span></div>
+    <p class="first">Five moves reproduce the whole affair. First, exchange SSH keys between the machines <em>over the fast link</em>, not merely the household LAN — the launch drives the worker across it. Second, download the checkpoint once (with Xet storage disabled, or old clients hang) and <code>rsync</code> it to the worker.</p>
+    <p>Third, stage the image over the fabric and re-register its digest on the far side. Fourth, fill the environment file with the fabric addresses and NCCL adapter, then launch from the head and wait for <code>/health</code>. Fifth, point any agent's <code>base_url</code> at port 8888 — and a million-token reasoning model, on hardware you own, is yours to command.</p>
+
+    <div class="thanks">
+      <div class="th">With Thanks</div>
+      <div class="rows">
+        <div class="rw"><div class="n"><a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark">Mia · MiaAI-Lab</a></div><div class="d">The DSpark 2× DGX Spark recipe and GB10-tuned image with the DeepSeek-V4 hotfixes — the backbone of this deploy. Thank you, Mia.</div></div>
+        <div class="rw"><div class="n"><a href="https://nacyot.github.io/artifacts/vllm-spin-wait-gb10/">nacyot</a></div><div class="d">The spin-wait analysis: that idle CPU cores, not the GPU, are the thermal limiter on an integrated Grace-Blackwell SoC.</div></div>
+        <div class="rw"><div class="n"><a href="https://github.com/agjs/gb10-clock-cap">@pbastowski · gb10-clock-cap</a></div><div class="d">The GPU clock-cap lever at the efficiency knee — watts and heat bought down with negligible decode cost.</div></div>
+        <div class="rw"><div class="n"><a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731">DeepSeek</a></div><div class="d">DeepSeek-V4-Flash-0731 — the reasoning MoE, its NVFP4 checkpoint, and the trained speculative-decode head that make it all fit.</div></div>
+      </div>
+    </div>
+
+  </div><!-- /article -->
+
+  <!-- ============ COLOPHON ============ -->
+  <div class="colophon">
+    Printed &amp; measured on a home-lab dual NVIDIA DGX Spark cluster
+    <div class="row">
+      <a href="index.html">The Single-Spark Recipe</a>
+      <a href="speed.html">Speed Deep-Dive</a>
+      <a href="https://github.com/hsrakri/sparky">GitHub · hsrakri/sparky</a>
+    </div>
+  </div>
+
+</div><!-- /pad -->
+</div><!-- /sheet -->
+
+<script>
+addEventListener('scroll',function(){
+  var h=document.documentElement;
+  document.getElementById('prog').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight)*100)+'%';
+},{passive:true});
+</script>
+</body>
+</html>
