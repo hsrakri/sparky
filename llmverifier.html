@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>The Spark Dispatch — Self-Verification on a Dual DGX Spark Cluster</title>
-<meta name="description" content="Technical report: running llm-as-a-verifier self-verification with DeepSeek-V4-Flash on a 2x DGX Spark vLLM cluster — including the reasoning-parser bug that silently flattens all scores to 0.5, the upstream fix (PR #6), and measured selection results.">
+<meta name="description" content="Technical report: running llm-as-a-verifier self-verification with DeepSeek-V4-Flash on a 2x DGX Spark vLLM cluster — including the reasoning-parser bug that silently flattens all scores to 0.5, the upstream fix (PR #7), and measured selection results.">
 <meta property="og:title" content="Self-Verification on a Dual DGX Spark Cluster">
 <meta property="og:description" content="Root-cause analysis and fix for silent flat-0.5 scoring on vLLM reasoning-parser servers, with measured best-of-N results.">
 <meta property="og:type" content="article">
@@ -182,7 +182,7 @@
         <li><span class="ic">①</span><span><b>Goal:</b> reproduce self-verification (same model generates N candidates and ranks them) on a self-hosted 2× DGX Spark vLLM cluster serving DeepSeek-V4-Flash-0731. Published gains: 79.4% → 86.5% (best-of-3), 88.0% (best-of-5) on Terminal-Bench 2.1.</span></li>
         <li><span class="ic">②</span><span><b>Defect found:</b> on any OpenAI-compatible server running a reasoning parser, every score collapses to the library's 0.5 fallback and selection is arbitrary. No error is raised.</span></li>
         <li><span class="ic">③</span><span><b>Root cause:</b> the prefilled score token is returned in <code>message.reasoning</code>, not <code>message.content</code>; the resulting empty token re-matches the score tag and the closing-tag placeholder overwrites the captured logprob distribution.</span></li>
-        <li><span class="ic">④</span><span><b>Fix:</b> read the letter from the reasoning field; forbid empty-token tag re-matches. Submitted as <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/6">PR #6</a> (issue <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/issues/5">#5</a>). Verified: 0.91 vs 0.73 pairwise; best-of-3 selects correctly at 4 evaluation passes.</span></li>
+        <li><span class="ic">④</span><span><b>Fix:</b> read the letter from the reasoning field; forbid empty-token tag re-matches. Submitted as <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/7">PR #7</a> (issue <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/issues/5">#5</a>). Verified: 0.91 vs 0.73 pairwise; best-of-3 selects correctly at 4 evaluation passes.</span></li>
         <li><span class="ic">⑤</span><span><b>Deployment:</b> ~26 min per reliable selection at cluster throughput → deployed as an unattended batch tool (N candidates at spread temperatures, self-verified selection, full run log), not an interactive one.</span></li>
       </ul>
     </div>
@@ -215,7 +215,7 @@ matcher:  pos 0: "...&lt;score_A&gt;"      ends with tag -&gt; read pos 1  <span
     </div>
 
     <div class="subhead"><span>4 · Fix</span></div>
-    <p class="first">Two changes, submitted upstream as <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/6">PR #6</a> with root-cause writeup in <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/issues/5">issue #5</a>. (1) The letter falls back to <code>message.reasoning</code> / <code>message.reasoning_content</code> when <code>content</code> is empty. (2) An empty token can no longer re-match the tag in <code>_find_tag_logprobs</code>, so a captured distribution cannot be shadowed by the closing-tag placeholder regardless of which field the letter arrives in. The DeepSeek-API and Gemini code paths are unaffected: <code>content</code> is populated there, and the hardening only skips empty tokens.</p>
+    <p class="first">Two changes, submitted upstream as <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/7">PR #7</a> with root-cause writeup in <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/issues/5">issue #5</a>. (1) The letter falls back to <code>message.reasoning</code> / <code>message.reasoning_content</code> when <code>content</code> is empty. (2) An empty token can no longer re-match the tag in <code>_find_tag_logprobs</code>, so a captured distribution cannot be shadowed by the closing-tag placeholder regardless of which field the letter arrives in. The DeepSeek-API and Gemini code paths are unaffected: <code>content</code> is populated there, and the hardening only skips empty tokens.</p>
 
     <div class="subhead"><span>5 · Measured Results</span></div>
     <p class="first">All runs on the cluster, model judging its own outputs, temperature 1.0 at the verifier as shipped. After the fix, a pairwise comparison of a correct string-reversal against a broken one scores 0.91 / 0.73. In a best-of-3 over Fibonacci implementations (iterative-correct, exponential-correct, formula-wrong), the incorrect candidate ranks last in both configurations tested; separating the two <em>correct</em> candidates on efficiency requires averaging: at one evaluation pass per criterion the selection is noise, at four passes it resolves correctly. Cost scales linearly: 30 calls / 8.6 min at one pass, 120 calls / 26 min at four. The library's cache-oriented prompt layout (shared prefix, criterion text at the tail) achieved a 53% prefix-cache hit rate against the server's <code>--enable-prefix-caching</code>.</p>
@@ -278,7 +278,7 @@ matcher:  pos 0: "...&lt;score_A&gt;"      ends with tag -&gt; read pos 1  <span
     <div class="row">
       <a href="deepseekv4flash.html">The Cluster Story</a>
       <a href="dispatch-infographic.html">The Infographic</a>
-      <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/6">Upstream Fix · PR #6</a>
+      <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/7">Upstream Fix · PR #7</a>
       <a href="https://github.com/hsrakri/sparky">GitHub · hsrakri/sparky</a>
     </div>
   </div>
