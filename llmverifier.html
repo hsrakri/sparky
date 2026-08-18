@@ -33,8 +33,12 @@
 
   .lede{max-width:66ch;margin:20px auto 0;text-align:center;font-size:16.5px;color:var(--sub)}
   .lede b{color:var(--ink)}
-  .status{max-width:66ch;margin:16px auto 0;border:1px solid var(--ink);background:var(--box);
-    padding:11px 16px;font-size:13.5px;text-align:center;font-family:var(--head)}
+  .topthanks{max-width:66ch;margin:18px auto 0;text-align:center;font-style:italic;font-size:14.5px;
+    line-height:1.5;color:var(--sub);border:1px solid var(--ink);background:var(--box);padding:12px 18px}
+  .topthanks a{border-bottom:1px solid var(--ink);font-style:normal}
+  .topthanks b{color:var(--ink)}
+  .status{max-width:66ch;margin:26px auto 0;border:2px solid var(--ink);background:var(--box);
+    padding:13px 18px;font-size:14px;text-align:center;font-family:var(--head)}
   .status b{letter-spacing:.02em}
 
   /* headline numbers */
@@ -111,9 +115,11 @@
     <div class="sub"><span>DeepSeek-V4-Flash-0731</span><span>2× DGX Spark · TP=2</span><span>self-verified · $0 cloud</span></div>
   </div>
 
-  <p class="lede">Best-of-N selection with DeepSeek-V4-Flash as <b>both generator and verifier</b>, measured on a two-node GB10 cluster. Generate several answers, let the same model rank them, keep the winner.</p>
+  <div class="topthanks">
+    With thanks to <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier"><b>llm-as-a-verifier</b></a> for the framework and the self-verification results, and to <a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark"><b>Mia · MiaAI-Lab</b></a> for the DSpark recipe that put the model on two Sparks.
+  </div>
 
-  <div class="status"><b>Status — from our standpoint: FIXED</b> (re-verified live on our cluster). Self-hosted vLLM with a reasoning parser silently scored everything 0.5; a two-line fix restores real scores. Running the patched build (<a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/7">PR #7</a>, open upstream); our cluster is on it now.</div>
+  <p class="lede">Best-of-N selection with DeepSeek-V4-Flash as <b>both generator and verifier</b>, measured on a two-node GB10 cluster. Generate several answers, let the same model rank them, keep the winner.</p>
 
   <!-- headline numbers -->
   <div class="bignum">
@@ -174,6 +180,8 @@
     <div class="cr"><div class="n"><a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark">Mia · MiaAI-Lab</a></div><div class="d">The DSpark dual-Spark recipe this cluster runs — the test platform.</div></div>
     <div class="cr"><div class="n"><a href="https://github.com/anemll">anemll</a></div><div class="d">The GB10-tuned vLLM runtime, including the structured-output support the scoring method needs.</div></div>
   </div>
+
+  <div class="status"><b>Status — from our standpoint: FIXED</b> (re-verified live on our cluster). Self-hosted vLLM with a reasoning parser silently scored everything 0.5; a two-line fix restores real scores. Running the patched build (<a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/7">PR #7</a>, open upstream); our cluster is on it now.</div>
 
   <div class="colophon">
     Measured on a home-lab dual NVIDIA DGX Spark cluster
