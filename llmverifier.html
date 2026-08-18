@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Spark Dispatch — Self-Verification on a Dual DGX Spark Cluster</title>
+<meta name="description" content="Technical report: running llm-as-a-verifier self-verification with DeepSeek-V4-Flash on a 2x DGX Spark vLLM cluster — including the reasoning-parser bug that silently flattens all scores to 0.5, the upstream fix (PR #6), and measured selection results.">
+<meta property="og:title" content="Self-Verification on a Dual DGX Spark Cluster">
+<meta property="og:description" content="Root-cause analysis and fix for silent flat-0.5 scoring on vLLM reasoning-parser servers, with measured best-of-N results.">
+<meta property="og:type" content="article">
+<style>
+  :root{
+    --paper:#ffffff; --box:#f6f6f6;
+    --ink:#111111; --sub:#333333; --faint:#666666;
+    --hair:rgba(0,0,0,.22);
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --head:"Times New Roman",Georgia,"Iowan Old Style",serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:#e8e8e8;color:var(--ink);font-family:var(--serif);line-height:1.5;-webkit-font-smoothing:antialiased}
+  #prog{position:fixed;top:0;left:0;height:3px;width:0;z-index:99;background:var(--ink);transition:width .1s linear}
+  .sheet{max-width:1120px;margin:0 auto;background:var(--paper);box-shadow:0 0 50px rgba(0,0,0,.3)}
+  .pad{padding:0 clamp(18px,4.4vw,58px)}
+  a{color:inherit;text-decoration:none;border-bottom:1px solid var(--hair)}
+  a:hover{border-color:var(--ink)}
+  code{font-family:"Courier New",ui-monospace,monospace;font-size:.86em;
+    background:rgba(0,0,0,.05);padding:.05em .35em;border:1px solid var(--hair);border-radius:2px}
+
+  .flag-top{display:flex;justify-content:space-between;align-items:center;
+    font-family:var(--head);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--sub);border-bottom:1px solid var(--ink);padding:9px 0 8px}
+  .masthead{text-align:center;padding:16px 0 8px;border-bottom:3px double var(--ink)}
+  .masthead h1{font-family:var(--head);font-weight:800;letter-spacing:.02em;
+    font-size:clamp(42px,9vw,104px);line-height:.94;text-transform:uppercase}
+  .masthead .kicker-top{font-family:var(--head);font-size:12px;letter-spacing:.42em;
+    text-transform:uppercase;color:var(--sub);margin-bottom:8px}
+  .dateline-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;
+    font-family:var(--head);font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--sub);padding:7px 0;border-bottom:1px solid var(--ink)}
+  .dateline-bar .mid{font-style:italic;letter-spacing:.04em;text-transform:none;font-size:13px}
+
+  .lead-sec{padding-top:26px;padding-bottom:10px}
+  .sec-kicker{font-family:var(--head);font-size:13px;letter-spacing:.24em;text-transform:uppercase;
+    text-align:center;font-weight:700;margin-bottom:12px}
+  .headline{font-family:var(--head);font-weight:800;text-align:center;line-height:1.05;
+    font-size:clamp(30px,5.4vw,58px);letter-spacing:-.005em;max-width:24ch;margin:0 auto}
+  .deck{font-family:var(--serif);font-style:italic;text-align:center;color:var(--sub);
+    font-size:clamp(16px,2.1vw,21px);line-height:1.4;max-width:62ch;margin:16px auto 0}
+  .byline{text-align:center;font-family:var(--head);font-size:12.5px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--faint);margin:18px auto 0;
+    padding:10px 0;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);max-width:44ch}
+  .byline b{color:var(--ink)}
+  .topthanks{max-width:64ch;margin:14px auto 0;text-align:center;font-family:var(--serif);font-style:italic;
+    font-size:15px;line-height:1.5;color:var(--sub);
+    border:1px solid var(--ink);padding:12px 20px;background:var(--box)}
+  .topthanks a{border-bottom:1px solid var(--ink);font-style:normal}
+  .topthanks b{color:var(--ink)}
+
+  .tldr{max-width:70ch;margin:22px auto 0;border:2px solid var(--ink);background:var(--paper);
+    box-shadow:4px 4px 0 rgba(0,0,0,.18)}
+  .tldr .th{text-align:center;font-family:var(--head);font-weight:800;font-size:14px;
+    letter-spacing:.22em;text-transform:uppercase;
+    padding:10px;border-bottom:1px solid var(--ink);background:var(--ink);color:var(--paper)}
+  .tldr ul{list-style:none;padding:6px 0}
+  .tldr li{display:grid;grid-template-columns:34px 1fr;gap:8px;align-items:baseline;
+    padding:9px 18px 9px 14px;font-size:15.5px;line-height:1.5;border-bottom:1px solid var(--hair)}
+  .tldr li:last-child{border-bottom:none}
+  .tldr li .ic{font-family:var(--head);font-weight:800;text-align:center;font-size:16px}
+  .tldr li b{color:var(--ink)}
+
+  .article{padding-top:26px;padding-bottom:20px;
+    column-count:3;column-gap:34px;column-rule:1px solid var(--hair);
+    text-align:justify;hyphens:auto;font-size:16px;line-height:1.6}
+  .article p{margin:0 0 2px;text-indent:1.3em}
+  .article p.first{text-indent:0}
+  .article p.first::first-letter{float:left;font-family:var(--head);font-weight:800;
+    font-size:5.2em;line-height:.78;padding:.02em .09em 0 0}
+  .subhead{column-span:all;font-family:var(--head);font-weight:800;text-transform:uppercase;
+    letter-spacing:.03em;font-size:19px;text-align:center;margin:24px 0 12px;
+    padding-top:12px;border-top:1px solid var(--ink);position:relative}
+  .subhead span{background:var(--paper);padding:0 14px;position:relative;top:-23px;display:inline-block;margin-bottom:-17px}
+  .article strong{font-weight:700}
+
+  .boxwrap{column-span:all;margin:20px 0}
+  .box{background:var(--box);border:2px solid var(--ink)}
+  .box .bh{border-bottom:1px solid var(--ink);padding:12px 18px;text-align:center}
+  .box .bh .t{font-family:var(--head);font-weight:800;text-transform:uppercase;letter-spacing:.1em;font-size:18px}
+  .box .bh .s{font-family:var(--head);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-top:3px}
+  table{width:100%;border-collapse:collapse;font-size:14.5px}
+  th,td{padding:9px 16px;text-align:left;border-bottom:1px solid var(--hair)}
+  th{font-family:var(--head);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-weight:700}
+  td.num{text-align:right;font-family:"Courier New",monospace;font-variant-numeric:tabular-nums}
+  td b{font-weight:700}
+  tr:last-child td{border-bottom:none}
+  .box .foot{border-top:1px solid var(--ink);padding:8px 16px;font-size:11.5px;font-style:italic;color:var(--faint);text-align:center}
+
+  .fig-box{column-span:all;margin:22px 0;border:1px solid var(--ink);background:var(--box)}
+  .fig-box .cap{border-bottom:1px solid var(--ink);padding:9px 16px;font-family:var(--head);
+    font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--sub);display:flex;justify-content:space-between;gap:10px}
+  pre{padding:16px 18px;font-family:"Courier New",ui-monospace,monospace;font-size:12.5px;
+    line-height:1.7;color:var(--ink);overflow-x:auto;white-space:pre}
+  pre .em{font-weight:700}
+  pre .cm{color:var(--faint);font-style:italic}
+
+  .charts{column-span:all;margin:22px 0}
+  .chartrow{display:grid;grid-template-columns:1fr 1fr;border:2px solid var(--ink);background:var(--box)}
+  .chartcell{padding:16px 18px 14px;border-right:1px solid var(--ink)}
+  .chartcell:last-child{border-right:none}
+  .chartcell h5{font-family:var(--head);font-weight:800;font-size:14px}
+  .chartcell .fno{font-family:var(--head);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;font-weight:700}
+  .chartcell .cs{font-size:11.5px;font-style:italic;color:var(--faint);margin:1px 0 8px}
+  .chartcell svg{width:100%;height:auto;display:block}
+  .clegend{display:flex;gap:15px;flex-wrap:wrap;font-family:var(--head);font-size:10.5px;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--sub);margin-top:6px}
+  .clegend i{display:inline-block;width:15px;height:10px;margin-right:5px;vertical-align:-1px;border:1px solid var(--ink)}
+  svg .axis{stroke:var(--ink);stroke-width:1.2;fill:none}
+  svg .grid{stroke:rgba(0,0,0,.14);stroke-width:1}
+  svg .lbl{font-family:"Times New Roman",Georgia,serif;font-size:10px;fill:var(--faint)}
+  svg .vlbl{font-family:"Courier New",monospace;font-size:10px;fill:var(--ink);font-weight:700}
+
+  .thanks{column-span:all;margin:22px 0 6px;border:2px solid var(--ink);background:var(--box)}
+  .thanks .th{text-align:center;font-family:var(--head);font-weight:800;text-transform:uppercase;letter-spacing:.12em;
+    font-size:15px;padding:11px;border-bottom:1px solid var(--ink)}
+  .thanks .rows{display:grid;grid-template-columns:1fr 1fr}
+  .thanks .rw{padding:14px 18px;border-bottom:1px solid var(--hair)}
+  .thanks .rw:nth-child(odd){border-right:1px solid var(--hair)}
+  .thanks .rw .n{font-family:var(--head);font-weight:700;font-size:15px}
+  .thanks .rw .n a{border-bottom:1px solid var(--ink)}
+  .thanks .rw .d{font-size:13px;color:var(--sub);margin-top:3px;line-height:1.4}
+
+  .colophon{border-top:3px double var(--ink);text-align:center;padding:22px 0 40px;
+    font-family:var(--head);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .colophon a{border-bottom:1px solid var(--ink);font-weight:700;color:var(--ink)}
+  .colophon .row{margin-top:12px;display:inline-flex;gap:20px;flex-wrap:wrap;justify-content:center}
+
+  @media(max-width:900px){ .article{column-count:2} }
+  @media(max-width:620px){
+    .article{column-count:1}
+    .thanks .rows{grid-template-columns:1fr}
+    .thanks .rw:nth-child(odd){border-right:none}
+    .chartrow{grid-template-columns:1fr}
+    .chartcell{border-right:none;border-bottom:1px solid var(--ink)}
+    .chartcell:last-child{border-bottom:none}
+  }
+</style>
+</head>
+<body>
+<div id="prog"></div>
+<div class="sheet">
+<div class="pad">
+
+  <!-- ============ MASTHEAD ============ -->
+  <div class="flag-top">
+    <span>Vol. II · No. 5</span>
+    <span>The Home-Lab Bureau</span>
+    <span>Price: $0.00 / cloud-free</span>
+  </div>
+  <div class="masthead">
+    <div class="kicker-top">Recipes &amp; Overnight Benchmarks from the Rack</div>
+    <h1>The Spark Dispatch</h1>
+  </div>
+  <div class="dateline-bar">
+    <span>Self-Verification Edition</span>
+    <span class="mid">"Every number measured, every crash documented."</span>
+    <span>GB10 · sm_121a · aarch64</span>
+  </div>
+
+  <!-- ============ HEADLINE ============ -->
+  <div class="lead-sec">
+    <div class="sec-kicker">Technical Report · Root Cause · Upstream Fix</div>
+    <h2 class="headline">Self-Verification on a Dual DGX Spark Cluster</h2>
+    <p class="deck">Running llm-as-a-verifier best-of-N selection with DeepSeek-V4-Flash as both generator and verifier, on self-hosted vLLM — including the reasoning-parser bug that silently flattens every score to 0.5, its root cause, the fix submitted upstream, and measured selection results.</p>
+    <div class="topthanks">
+      With thanks to the <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier"><b>llm-as-a-verifier</b></a> authors for the framework, the prefill-scoring method, and the published Terminal-Bench self-verification results that motivated this work.
+    </div>
+    <div class="byline">By the <b>Sparky Desk</b> · Filed from the rack</div>
+
+    <div class="tldr">
+      <div class="th">Summary</div>
+      <ul>
+        <li><span class="ic">①</span><span><b>Goal:</b> reproduce self-verification (same model generates N candidates and ranks them) on a self-hosted 2× DGX Spark vLLM cluster serving DeepSeek-V4-Flash-0731. Published gains: 79.4% → 86.5% (best-of-3), 88.0% (best-of-5) on Terminal-Bench 2.1.</span></li>
+        <li><span class="ic">②</span><span><b>Defect found:</b> on any OpenAI-compatible server running a reasoning parser, every score collapses to the library's 0.5 fallback and selection is arbitrary. No error is raised.</span></li>
+        <li><span class="ic">③</span><span><b>Root cause:</b> the prefilled score token is returned in <code>message.reasoning</code>, not <code>message.content</code>; the resulting empty token re-matches the score tag and the closing-tag placeholder overwrites the captured logprob distribution.</span></li>
+        <li><span class="ic">④</span><span><b>Fix:</b> read the letter from the reasoning field; forbid empty-token tag re-matches. Submitted as <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/6">PR #6</a> (issue <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/issues/5">#5</a>). Verified: 0.91 vs 0.73 pairwise; best-of-3 selects correctly at 4 evaluation passes.</span></li>
+        <li><span class="ic">⑤</span><span><b>Deployment:</b> ~26 min per reliable selection at cluster throughput → deployed as an unattended batch tool (N candidates at spread temperatures, self-verified selection, full run log), not an interactive one.</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ ARTICLE ============ -->
+  <div class="article">
+    <div class="subhead"><span>1 · Method Under Test</span></div>
+    <p class="first"><a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier">llm-as-a-verifier</a> (MIT, arXiv 2607.05391) implements best-of-N selection: N candidate solutions are compared pairwise by a verifier LLM against named criteria, with a pivot tournament reducing the comparison count from O(N²) to O(Nk). Scores are not parsed from free text. The library appends a <code>&lt;score_X&gt;</code> tag to the verifier's analysis, requests exactly one further token constrained to a 20-letter scale (vLLM <code>continue_final_message</code> + structured outputs), and reads the full top-logprob distribution at that position — an expectation over the scale rather than a single sampled grade.</p>
+    <p>The relevant published result: with deepseek-v4-flash as both generator and verifier, Terminal-Bench 2.1 pass rates rise from 79.4% (pass@1) to 86.5% with best-of-3 and 88.0% with best-of-5. The test platform here serves the same checkpoint (DeepSeek-V4-Flash-0731, NVFP4, TP=2 across two GB10 nodes over 200&nbsp;Gb RoCE, DSpark MTP-5, <code>--reasoning-parser deepseek_v4</code>), so the configuration matches the paper's headline case, self-hosted.</p>
+
+    <div class="subhead"><span>2 · Observed Defect</span></div>
+    <p class="first">Pointing the library at the cluster's OpenAI-compatible endpoint produced uniform scores of exactly 0.5 for every candidate on every criterion — the library's documented fallback when no score can be read — making the returned winner an artifact of list order. Thirty calls completed without a single raised error. Server logs confirmed the requests executed and generated normally: the verifier was producing verdicts; the client was discarding them.</p>
+    <p>Replaying the library's prefill request manually against the endpoint isolated the discrepancy. The server returns a correct, grammar-constrained letter distribution in <code>logprobs</code> — but the sampled token itself arrives in <code>message.reasoning</code> with <code>message.content = null</code>, because the reasoning parser classifies a continuation without a closed think-block as reasoning content. This is standard behavior for any self-hosted DeepSeek deployment, including every DSpark-recipe server.</p>
+
+    <div class="subhead"><span>3 · Root Cause</span></div>
+    <p class="first">The failure requires two interacting details. First, <code>_score_tags_by_prefill</code> reads the score letter from <code>message.content</code>; with the parser active this is empty, so the token recorded at the score position is the empty string. Second, <code>_find_tag_logprobs</code> selects the <em>last</em> position at which the accumulated text ends with the score tag — a deliberate rule, meant to skip mid-analysis mentions of the tag. Appending an empty token leaves the accumulated text unchanged, so it still ends with the tag; the rule re-matches one position late and returns the placeholder entry for the closing tag instead of the captured distribution. <code>extract_score</code> finds no scale letter in a placeholder and returns 0.5.</p>
+
+    <div class="fig-box">
+      <div class="cap"><span>Figure 1 — Token sequence at the score position</span><span>the shadowing mechanism</span></div>
+<pre>tokens:   ['\n&lt;score_A&gt;',   '',            '&lt;/score_A&gt;']
+                             <span class="em">^ empty: letter was filed under reasoning</span>
+
+logprobs: [ placeholder,   <span class="em">{A: .41, T: .52, ...}</span>,   placeholder ]
+                             <span class="em">^ real distribution, correctly captured</span>
+
+matcher:  pos 0: "...&lt;score_A&gt;"      ends with tag -&gt; read pos 1  <span class="cm">(correct)</span>
+          pos 1: "...&lt;score_A&gt;"+""   <span class="em">still ends with tag</span> -&gt; read pos 2
+          last-match rule keeps pos 2 -&gt; placeholder -&gt; <span class="em">score = 0.5</span></pre>
+    </div>
+
+    <div class="subhead"><span>4 · Fix</span></div>
+    <p class="first">Two changes, submitted upstream as <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/6">PR #6</a> with root-cause writeup in <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/issues/5">issue #5</a>. (1) The letter falls back to <code>message.reasoning</code> / <code>message.reasoning_content</code> when <code>content</code> is empty. (2) An empty token can no longer re-match the tag in <code>_find_tag_logprobs</code>, so a captured distribution cannot be shadowed by the closing-tag placeholder regardless of which field the letter arrives in. The DeepSeek-API and Gemini code paths are unaffected: <code>content</code> is populated there, and the hardening only skips empty tokens.</p>
+
+    <div class="subhead"><span>5 · Measured Results</span></div>
+    <p class="first">All runs on the cluster, model judging its own outputs, temperature 1.0 at the verifier as shipped. After the fix, a pairwise comparison of a correct string-reversal against a broken one scores 0.91 / 0.73. In a best-of-3 over Fibonacci implementations (iterative-correct, exponential-correct, formula-wrong), the incorrect candidate ranks last in both configurations tested; separating the two <em>correct</em> candidates on efficiency requires averaging: at one evaluation pass per criterion the selection is noise, at four passes it resolves correctly. Cost scales linearly: 30 calls / 8.6 min at one pass, 120 calls / 26 min at four. The library's cache-oriented prompt layout (shared prefix, criterion text at the tail) achieved a 53% prefix-cache hit rate against the server's <code>--enable-prefix-caching</code>.</p>
+
+    <div class="boxwrap">
+      <div class="box">
+        <div class="bh"><div class="t">Results</div><div class="s">deepseek-v4-flash-0731 · TP=2 · self-verification · all measured on-cluster</div></div>
+        <table>
+          <thead><tr><th>Measurement</th><th style="text-align:right">Value</th><th>Conditions</th></tr></thead>
+          <tbody>
+            <tr><td>Scores before fix (all candidates)</td><td class="num">0.500</td><td>silent fallback; winner arbitrary</td></tr>
+            <tr><td>Pairwise, correct vs. broken code</td><td class="num"><b>0.91 / 0.73</b></td><td>after fix, single criterion</td></tr>
+            <tr><td>Best-of-3, n_evaluations = 1</td><td class="num">incorrect pick</td><td>30 calls · 8.6 min · noisy</td></tr>
+            <tr><td>Best-of-3, n_evaluations = 4</td><td class="num"><b>correct pick</b></td><td>120 calls · 26 min</td></tr>
+            <tr><td>Prefix-cache hit rate</td><td class="num">53%</td><td>library prompt layout × vLLM cache</td></tr>
+            <tr><td>Reference: published self-verify gain</td><td class="num">+7.1 / +9.3 pts</td><td>Terminal-Bench 2.1, BO3 / BO5</td></tr>
+          </tbody>
+        </table>
+        <div class="foot">Selection reliability is purchased with evaluation passes; passes are purchased with wall time. At ~37 tok/s single-stream, that fixes the deployment class: batch, not interactive.</div>
+      </div>
+    </div>
+
+    <div class="charts">
+      <div class="chartrow">
+        <div class="chartcell">
+          <div class="fno">Fig. 2</div>
+          <h5>Pairwise scores, before / after fix</h5>
+          <div class="cs">correct vs. broken candidate, self-judged</div>
+          <svg id="cFix" viewBox="0 0 300 190"></svg>
+          <div class="clegend"><span><i style="background:#bbb"></i>before (fallback)</span><span><i style="background:#111"></i>after (live distribution)</span></div>
+        </div>
+        <div class="chartcell">
+          <div class="fno">Fig. 3</div>
+          <h5>Cost of one best-of-3 selection</h5>
+          <div class="cs">API calls and minutes vs. evaluation passes per criterion</div>
+          <svg id="cCost" viewBox="0 0 300 190"></svg>
+          <div class="clegend"><span><i style="background:#111"></i>calls</span><span><i style="background:#bbb"></i>minutes</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="subhead"><span>6 · Deployment</span></div>
+    <p class="first">Given ~26 minutes per reliable selection, the patched library is deployed on the cluster as an unattended batch utility rather than an interactive component. The tool accepts a task, generates N candidates from the cluster at a spread of temperatures for diversity, then runs verifier selection at four evaluation passes with concurrency capped to the server's scheduling limit. Each run archives all candidates, per-candidate scores, the winning output, and full token accounting. The installation is an editable checkout of the PR branch, so it tracks the upstream fix directly.</p>
+
+    <div class="thanks">
+      <div class="th">Credits</div>
+      <div class="rows">
+        <div class="rw"><div class="n"><a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier">llm-as-a-verifier</a></div><div class="d">Framework, prefill logprob scoring, pivot tournament, and the Terminal-Bench self-verification results reproduced here.</div></div>
+        <div class="rw"><div class="n"><a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731">DeepSeek</a></div><div class="d">DeepSeek-V4-Flash-0731 — generator and verifier in every measurement above.</div></div>
+        <div class="rw"><div class="n"><a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark">Mia · MiaAI-Lab</a></div><div class="d">The DSpark dual-Spark recipe this cluster runs — the test platform.</div></div>
+        <div class="rw"><div class="n"><a href="https://github.com/anemll">anemll</a></div><div class="d">The GB10-tuned vLLM runtime, including the structured-output support the scoring method depends on.</div></div>
+      </div>
+    </div>
+
+  </div><!-- /article -->
+
+  <!-- ============ COLOPHON ============ -->
+  <div class="colophon">
+    Investigated, fixed &amp; measured on a home-lab dual NVIDIA DGX Spark cluster
+    <div class="row">
+      <a href="deepseekv4flash.html">The Cluster Story</a>
+      <a href="dispatch-infographic.html">The Infographic</a>
+      <a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier/pull/6">Upstream Fix · PR #6</a>
+      <a href="https://github.com/hsrakri/sparky">GitHub · hsrakri/sparky</a>
+    </div>
+  </div>
+
+</div><!-- /pad -->
+</div><!-- /sheet -->
+
+<script>
+(function(){
+  var DARK='#111111', LIGHT='#bbbbbb';
+
+  // Fig 2 — pairwise before/after
+  (function(){
+    var s=document.getElementById('cFix'); if(!s)return;
+    var P={l:38,r:290,t:14,b:156}, ymax=1.0, g='';
+    [0,0.25,0.5,0.75,1.0].forEach(function(v){ var y=P.b-(v/ymax)*(P.b-P.t);
+      g+='<line class="grid" x1="'+P.l+'" y1="'+y+'" x2="'+P.r+'" y2="'+y+'"/>';
+      g+='<text class="lbl" x="'+(P.l-5)+'" y="'+(y+3)+'" text-anchor="end">'+v.toFixed(2)+'</text>'; });
+    g+='<line class="axis" x1="'+P.l+'" y1="'+P.t+'" x2="'+P.l+'" y2="'+P.b+'"/><line class="axis" x1="'+P.l+'" y1="'+P.b+'" x2="'+P.r+'" y2="'+P.b+'"/>';
+    function bar(x,v,c){ var h=(v/ymax)*(P.b-P.t), y=P.b-h;
+      return '<rect x="'+x+'" y="'+y+'" width="30" height="'+h+'" fill="'+c+'" stroke="#111" stroke-width="1"/>'+
+             '<text class="vlbl" x="'+(x+15)+'" y="'+(y-4)+'" text-anchor="middle">'+v+'</text>'; }
+    [{x:108,l:'correct code',b:0.5,a:0.91},{x:220,l:'broken code',b:0.5,a:0.73}].forEach(function(gr){
+      g+=bar(gr.x-34,gr.b,LIGHT)+bar(gr.x+4,gr.a,DARK);
+      g+='<text class="lbl" x="'+gr.x+'" y="'+(P.b+15)+'" text-anchor="middle" style="font-size:11px;fill:#111">'+gr.l+'</text>'; });
+    s.innerHTML=g;
+  })();
+
+  // Fig 3 — cost at evals 1 vs 4
+  (function(){
+    var s=document.getElementById('cCost'); if(!s)return;
+    var P={l:38,r:290,t:14,b:156}, ymax=130, g='';
+    [0,30,60,90,120].forEach(function(v){ var y=P.b-(v/ymax)*(P.b-P.t);
+      g+='<line class="grid" x1="'+P.l+'" y1="'+y+'" x2="'+P.r+'" y2="'+y+'"/>';
+      g+='<text class="lbl" x="'+(P.l-5)+'" y="'+(y+3)+'" text-anchor="end">'+v+'</text>'; });
+    g+='<line class="axis" x1="'+P.l+'" y1="'+P.t+'" x2="'+P.l+'" y2="'+P.b+'"/><line class="axis" x1="'+P.l+'" y1="'+P.b+'" x2="'+P.r+'" y2="'+P.b+'"/>';
+    function bar(x,v,c,lab){ var h=(v/ymax)*(P.b-P.t), y=P.b-h;
+      return '<rect x="'+x+'" y="'+y+'" width="30" height="'+h+'" fill="'+c+'" stroke="#111" stroke-width="1"/>'+
+             '<text class="vlbl" x="'+(x+15)+'" y="'+(y-4)+'" text-anchor="middle">'+lab+'</text>'; }
+    [{x:108,l:'1 pass (noisy)',calls:30,mins:8.6},{x:220,l:'4 passes (reliable)',calls:120,mins:26}].forEach(function(gr){
+      g+=bar(gr.x-34,gr.calls,DARK,gr.calls)+bar(gr.x+4,gr.mins,LIGHT,gr.mins+'m');
+      g+='<text class="lbl" x="'+gr.x+'" y="'+(P.b+15)+'" text-anchor="middle" style="font-size:11px;fill:#111">'+gr.l+'</text>'; });
+    s.innerHTML=g;
+  })();
+})();
+
+addEventListener('scroll',function(){
+  var h=document.documentElement;
+  document.getElementById('prog').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight)*100)+'%';
+},{passive:true});
+</script>
+</body>
+</html>

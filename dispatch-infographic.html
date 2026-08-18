@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Spark Dispatch — By The Numbers</title>
+<meta name="description" content="One-page infographic: every measured benchmark from the dual DGX Spark DeepSeek-V4-Flash deployment and the self-verification investigation, plus full credits.">
+<meta property="og:title" content="The Spark Dispatch — By The Numbers">
+<meta property="og:description" content="Dual-Spark DeepSeek cluster + self-verification: all benchmarks, all credits, one page.">
+<style>
+  :root{
+    --paper:#ffffff; --box:#f6f6f6;
+    --ink:#111111; --sub:#333333; --faint:#666666;
+    --hair:rgba(0,0,0,.22);
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --head:"Times New Roman",Georgia,serif;
+    --mono:"Courier New",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#e8e8e8;color:var(--ink);font-family:var(--serif);line-height:1.45;-webkit-font-smoothing:antialiased}
+  .sheet{max-width:1000px;margin:0 auto;background:var(--paper);box-shadow:0 0 50px rgba(0,0,0,.3);
+    padding:0 clamp(16px,4vw,48px) 40px}
+  a{color:inherit;text-decoration:none;border-bottom:1px solid var(--hair)}
+  a:hover{border-color:var(--ink)}
+
+  .masthead{text-align:center;padding:20px 0 10px;border-bottom:3px double var(--ink)}
+  .masthead .k{font-family:var(--head);font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:var(--sub);margin-bottom:6px}
+  .masthead h1{font-family:var(--head);font-weight:800;text-transform:uppercase;letter-spacing:.02em;
+    font-size:clamp(34px,7vw,64px);line-height:.95}
+  .masthead .sub{font-family:var(--head);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--sub);
+    padding:8px 0 2px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+
+  .bignum{display:grid;grid-template-columns:repeat(4,1fr);border:2px solid var(--ink);margin-top:22px}
+  .bn{padding:18px 14px;text-align:center;border-right:1px solid var(--ink)}
+  .bn:last-child{border-right:none}
+  .bn .v{font-family:var(--head);font-weight:800;font-size:clamp(26px,4.4vw,44px);line-height:1;font-variant-numeric:tabular-nums}
+  .bn .k{font-family:var(--head);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-top:7px;line-height:1.35}
+
+  h2.band{font-family:var(--head);font-weight:800;font-size:15px;letter-spacing:.2em;text-transform:uppercase;
+    text-align:center;background:var(--ink);color:var(--paper);padding:9px;margin-top:26px}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0;border:2px solid var(--ink);border-top:none}
+  .cell{padding:16px 18px;border-right:1px solid var(--ink);border-bottom:1px solid var(--hair)}
+  .cell:nth-child(2n){border-right:none}
+  .cell h4{font-family:var(--head);font-weight:800;font-size:13.5px;letter-spacing:.02em}
+  .cell .cs{font-size:11px;font-style:italic;color:var(--faint);margin:1px 0 10px}
+  .cell svg{width:100%;height:auto;display:block}
+  svg .axis{stroke:var(--ink);stroke-width:1.2;fill:none}
+  svg .grid{stroke:rgba(0,0,0,.13);stroke-width:1}
+  svg .lbl{font-family:"Times New Roman",Georgia,serif;font-size:10px;fill:var(--faint)}
+  svg .vlbl{font-family:var(--mono);font-size:10px;fill:var(--ink);font-weight:700}
+
+  /* horizontal bar rows */
+  .hrow{display:grid;grid-template-columns:150px 1fr 74px;gap:10px;align-items:center;margin:7px 0;font-size:12.5px}
+  .hrow .n{font-family:var(--mono);text-align:right;color:var(--sub);font-size:11.5px;line-height:1.25}
+  .hrow .track{height:19px;border:1px solid var(--ink);position:relative;background:var(--paper)}
+  .hrow .fill{position:absolute;inset:0 auto 0 0;background:var(--ink)}
+  .hrow .fill.lt{background:#bbb}
+  .hrow .fill.hatch{background:repeating-linear-gradient(45deg,#111 0 3px,#fff 3px 6px)}
+  .hrow .v{font-family:var(--mono);font-size:11.5px;font-weight:700}
+
+  .note{font-size:11px;font-style:italic;color:var(--faint);margin-top:8px}
+
+  /* credits */
+  .creds{border:2px solid var(--ink);border-top:none;display:grid;grid-template-columns:1fr 1fr 1fr}
+  .cr{padding:14px 16px;border-right:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+  .cr:nth-child(3n){border-right:none}
+  .cr .n{font-family:var(--head);font-weight:800;font-size:14px}
+  .cr .n a{border-bottom:1px solid var(--ink)}
+  .cr .d{font-size:11.5px;color:var(--sub);margin-top:3px;line-height:1.4}
+
+  .colophon{border-top:3px double var(--ink);margin-top:26px;text-align:center;padding:16px 0 6px;
+    font-family:var(--head);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .colophon a{border-bottom:1px solid var(--ink);color:var(--ink);font-weight:700}
+  .colophon .row{margin-top:8px;display:inline-flex;gap:18px;flex-wrap:wrap;justify-content:center}
+
+  @media(max-width:720px){
+    .bignum{grid-template-columns:1fr 1fr}
+    .bn:nth-child(2){border-right:none}
+    .bn:nth-child(1),.bn:nth-child(2){border-bottom:1px solid var(--ink)}
+    .grid2{grid-template-columns:1fr}
+    .cell{border-right:none}
+    .creds{grid-template-columns:1fr}
+    .cr{border-right:none}
+    .hrow{grid-template-columns:110px 1fr 60px}
+  }
+  @media print{ body{background:#fff} .sheet{box-shadow:none} }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="k">The Spark Dispatch · Special Poster</div>
+    <h1>By The Numbers</h1>
+    <div class="sub">
+      <span>Dual DGX Spark · DeepSeek-V4-Flash-0731</span>
+      <span>Every number measured on the rack</span>
+      <span>Cloud cost: $0.00</span>
+    </div>
+  </div>
+
+  <!-- ====== headline numbers ====== -->
+  <div class="bignum">
+    <div class="bn"><div class="v">2×</div><div class="k">GB10 Sparks · one model<br>TP=2 over 200 Gb RoCE</div></div>
+    <div class="bn"><div class="v">1M</div><div class="k">token context window<br>NVFP4 · DSpark MTP-5</div></div>
+    <div class="bn"><div class="v">~37</div><div class="k">tok/s single-stream decode<br>156 GB MoE, incl. TTFT</div></div>
+    <div class="bn"><div class="v">0.91</div><div class="k">self-verified score, correct code<br>(vs 0.73 broken) after fix</div></div>
+  </div>
+
+  <!-- ====== cluster benchmarks ====== -->
+  <h2 class="band">I · Cluster Benchmarks</h2>
+  <div class="grid2">
+    <div class="cell">
+      <h4>Decode speed</h4>
+      <div class="cs">single stream · 256-token generations · includes TTFT</div>
+      <div class="hrow"><div class="n">warm (best)</div><div class="track"><div class="fill" style="width:100%"></div></div><div class="v">38 tok/s</div></div>
+      <div class="hrow"><div class="n">warm (median)</div><div class="track"><div class="fill" style="width:97%"></div></div><div class="v">37 tok/s</div></div>
+      <div class="hrow"><div class="n">cold first request</div><div class="track"><div class="fill lt" style="width:21%"></div></div><div class="v">8.1 tok/s</div></div>
+      <div class="note">A 156 GB reasoning MoE, sharded over a network link, holding a million-token window.</div>
+    </div>
+    <div class="cell">
+      <h4>Memory per node</h4>
+      <div class="cs">why one Spark won't do · GiB resident of ~121 available</div>
+      <div class="hrow"><div class="n">node one</div><div class="track"><div class="fill" style="width:65%"></div></div><div class="v">79 GiB</div></div>
+      <div class="hrow"><div class="n">node two</div><div class="track"><div class="fill" style="width:65%"></div></div><div class="v">79 GiB</div></div>
+      <div class="hrow"><div class="n">single-node need</div><div class="track"><div class="fill hatch" style="width:100%"></div></div><div class="v">156 GB</div></div>
+      <div class="note">The checkpoint alone exceeds one node's memory before any KV cache is allocated.</div>
+    </div>
+    <div class="cell">
+      <h4>Provisioning over the fabric</h4>
+      <div class="cs">download once, copy at wire speed — no double pull</div>
+      <div class="hrow"><div class="n">weights, node→node</div><div class="track"><div class="fill" style="width:58%"></div></div><div class="v">690 MB/s</div></div>
+      <div class="hrow"><div class="n">image, node→node</div><div class="track"><div class="fill" style="width:58%"></div></div><div class="v">18 GB tar</div></div>
+      <div class="hrow"><div class="n">Seagate backup</div><div class="track"><div class="fill lt" style="width:10%"></div></div><div class="v">118 MB/s</div></div>
+      <div class="note">Internet download spent once (156 GB); the 200 Gb link did the rest. Backup verified byte-identical, 48/48 shards.</div>
+    </div>
+    <div class="cell">
+      <h4>Spin-wait fix — CPU under load</h4>
+      <div class="cs">vLLM container CPU %, six concurrent streams · head node</div>
+      <div class="hrow"><div class="n">before (busy_loop 1 s)</div><div class="track"><div class="fill hatch" style="width:100%"></div></div><div class="v">377%</div></div>
+      <div class="hrow"><div class="n">after (0.002 s)</div><div class="track"><div class="fill" style="width:75%"></div></div><div class="v">281%</div></div>
+      <div class="hrow"><div class="n">throughput change</div><div class="track"><div class="fill lt" style="width:2%"></div></div><div class="v">≈ 0</div></div>
+      <div class="note">One full CPU core freed at zero decode cost. GPU clock-cap evaluated and skipped: load draw was already 42 W / 34 W.</div>
+    </div>
+  </div>
+
+  <!-- ====== verifier benchmarks ====== -->
+  <h2 class="band">II · Self-Verification Benchmarks</h2>
+  <div class="grid2">
+    <div class="cell">
+      <h4>Pairwise scores, before / after fix</h4>
+      <div class="cs">correct vs. broken candidate · model judging itself</div>
+      <div class="hrow"><div class="n">before — any candidate</div><div class="track"><div class="fill hatch" style="width:50%"></div></div><div class="v">0.50</div></div>
+      <div class="hrow"><div class="n">after — correct code</div><div class="track"><div class="fill" style="width:91%"></div></div><div class="v">0.91</div></div>
+      <div class="hrow"><div class="n">after — broken code</div><div class="track"><div class="fill lt" style="width:73%"></div></div><div class="v">0.73</div></div>
+      <div class="note">Before the fix every score was the 0.5 fallback — selection arbitrary, no error raised. Root cause &amp; fix: upstream PR #6.</div>
+    </div>
+    <div class="cell">
+      <h4>Cost of one reliable best-of-3</h4>
+      <div class="cs">evaluation passes per criterion vs. calls and wall time</div>
+      <div class="hrow"><div class="n">1 pass — calls</div><div class="track"><div class="fill lt" style="width:25%"></div></div><div class="v">30 · 8.6 m</div></div>
+      <div class="hrow"><div class="n">4 passes — calls</div><div class="track"><div class="fill" style="width:100%"></div></div><div class="v">120 · 26 m</div></div>
+      <div class="hrow"><div class="n">prefix-cache hits</div><div class="track"><div class="fill lt" style="width:53%"></div></div><div class="v">53%</div></div>
+      <div class="note">1 pass picked wrong; 4 passes picked right. Published self-verify gains (Terminal-Bench 2.1): +7.1 pts BO3, +9.3 pts BO5. Deployed as an overnight batch tool.</div>
+    </div>
+  </div>
+
+  <!-- ====== credits ====== -->
+  <h2 class="band">III · Credits</h2>
+  <div class="creds">
+    <div class="cr"><div class="n"><a href="https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark">Mia · MiaAI-Lab</a></div><div class="d">The DSpark 2× DGX Spark recipe — the backbone of the whole deployment.</div></div>
+    <div class="cr"><div class="n"><a href="https://github.com/anemll">anemll</a></div><div class="d">GB10-tuned vLLM runtime image, incl. the structured-output support.</div></div>
+    <div class="cr"><div class="n"><a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731">DeepSeek</a></div><div class="d">DeepSeek-V4-Flash-0731 — the model, its NVFP4 checkpoint, its draft head.</div></div>
+    <div class="cr"><div class="n"><a href="https://nacyot.github.io/artifacts/vllm-spin-wait-gb10/">nacyot</a></div><div class="d">The GB10 spin-wait analysis behind the free-CPU-core fix.</div></div>
+    <div class="cr"><div class="n"><a href="https://github.com/agjs/gb10-clock-cap">@pbastowski</a></div><div class="d">The gb10-clock-cap lever — measured here, honestly declined.</div></div>
+    <div class="cr"><div class="n"><a href="https://github.com/llm-as-a-verifier/llm-as-a-verifier">llm-as-a-verifier</a></div><div class="d">The self-verification framework and results; our fix filed as PR #6.</div></div>
+  </div>
+
+  <div class="colophon">
+    Measured on a home-lab dual NVIDIA DGX Spark cluster
+    <div class="row">
+      <a href="deepseekv4flash.html">The Cluster Story</a>
+      <a href="llmverifier.html">The Verifier Report</a>
+      <a href="https://github.com/hsrakri/sparky">GitHub · hsrakri/sparky</a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
