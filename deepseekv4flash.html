@@ -287,8 +287,8 @@ vllm serve <span class="vl">DeepSeek-V4-Flash-0731</span> \
     </div>
 
     <div class="subhead"><span>By the Numbers</span></div>
-    <p class="first">Warm and unhurried, a single request streams at about 37 tokens a second — remarkable for a 156-gigabyte reasoning model that is sharded over a network cable while holding a million-token window open. The first cold request, before the compute graphs settle, limps in at eight.</p>
-    <p>But the measurement that surprised us came under load, and it was not about the graphics chip at all.</p>
+    <p class="first">Inference has two speeds, and they are nothing alike. <em>Prefill</em> — reading the prompt — happens all at once, a single parallel matrix crunch that builds the model's working memory and yields the first token; it is bound by raw compute, and here it runs at about <b>1,020 tokens a second</b>, flat from a two-thousand-token prompt to sixteen thousand. <em>Decode</em> — writing the reply — comes one token at a time, each re-reading all 156 gigabytes of weights, so it is bound by memory bandwidth and runs at about <b>37 tokens a second</b> warm. Reading the question is roughly twenty-eight times faster than answering it.</p>
+    <p>That first decode number is remarkable in its own right for a 156-gigabyte reasoning model sharded over a network cable while holding a million-token window open; the first cold request, before the compute graphs settle, limps in at eight. But the measurement that surprised us came under load, and it was not about either speed — it was about the graphics chip not being the hottest thing in the rack.</p>
 
     <div class="boxwrap">
       <div class="box">
@@ -296,7 +296,8 @@ vllm serve <span class="vl">DeepSeek-V4-Flash-0731</span> \
         <table class="overflow">
           <thead><tr><th>Reading</th><th style="text-align:right">Value</th><th>Notes</th></tr></thead>
           <tbody>
-            <tr><td>Decode, single stream (warm)</td><td class="num"><span class="fig">~37</span> tok/s</td><td>best 38, incl. time-to-first-token</td></tr>
+            <tr><td>Prefill (prompt ingest)</td><td class="num"><span class="fig">~1,020</span> tok/s</td><td>flat 2k–16k · compute-bound</td></tr>
+            <tr><td>Decode, single stream (warm)</td><td class="num"><span class="fig">~37</span> tok/s</td><td>best 38 · bandwidth-bound</td></tr>
             <tr><td>Decode, first cold request</td><td class="num">8.1 tok/s</td><td>graphs still warming</td></tr>
             <tr><td>Weights per GPU</td><td class="num">79 GiB</td><td>156 GB checkpoint, halved</td></tr>
             <tr><td>Fabric copy, node → node</td><td class="num"><span class="g">~690</span> MB/s</td><td>200 Gb RoCE, provisioning</td></tr>

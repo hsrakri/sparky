@@ -104,7 +104,7 @@
   <div class="bignum">
     <div class="bn"><div class="v">2×</div><div class="k">GB10 Sparks · one model<br>TP=2 over 200 Gb RoCE</div></div>
     <div class="bn"><div class="v">1M</div><div class="k">token context window<br>NVFP4 · DSpark MTP-5</div></div>
-    <div class="bn"><div class="v">~37</div><div class="k">tok/s single-stream decode<br>156 GB MoE, incl. TTFT</div></div>
+    <div class="bn"><div class="v">1020<span style="font-size:.5em"> / 37</span></div><div class="k">tok/s prefill / decode<br>read prompt vs. write reply</div></div>
     <div class="bn"><div class="v">0.91</div><div class="k">self-verified score, correct code<br>(vs 0.73 broken) after fix</div></div>
   </div>
 
@@ -112,12 +112,12 @@
   <h2 class="band">I · Cluster Benchmarks</h2>
   <div class="grid2">
     <div class="cell">
-      <h4>Decode speed</h4>
-      <div class="cs">single stream · 256-token generations · includes TTFT</div>
-      <div class="hrow"><div class="n">warm (best)</div><div class="track"><div class="fill" style="width:100%"></div></div><div class="v">38 tok/s</div></div>
-      <div class="hrow"><div class="n">warm (median)</div><div class="track"><div class="fill" style="width:97%"></div></div><div class="v">37 tok/s</div></div>
-      <div class="hrow"><div class="n">cold first request</div><div class="track"><div class="fill lt" style="width:21%"></div></div><div class="v">8.1 tok/s</div></div>
-      <div class="note">A 156 GB reasoning MoE, sharded over a network link, holding a million-token window.</div>
+      <h4>Two speeds: read vs. write</h4>
+      <div class="cs">single stream · prefill = ingest prompt, decode = generate reply</div>
+      <div class="hrow"><div class="n">prefill (read)</div><div class="track"><div class="fill" style="width:100%"></div></div><div class="v">~1020 t/s</div></div>
+      <div class="hrow"><div class="n">decode warm (write)</div><div class="track"><div class="fill lt" style="width:3.6%"></div></div><div class="v">~37 t/s</div></div>
+      <div class="hrow"><div class="n">decode cold first</div><div class="track"><div class="fill lt" style="width:0.8%"></div></div><div class="v">8.1 t/s</div></div>
+      <div class="note">Prefill is parallel &amp; compute-bound (flat ~1020 t/s, 2k–16k); decode is one-at-a-time &amp; bandwidth-bound. Reading the prompt is ~28× faster than writing the answer.</div>
     </div>
     <div class="cell">
       <h4>Memory per node</h4>
