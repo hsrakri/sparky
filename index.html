@@ -242,6 +242,7 @@
   <a href="results.html">Results ↗</a>
   <a href="demo.html">Live demo ↗</a>
   <a href="speed.html">2× tuning ↗</a>
+  <a href="remotelock.html">Remote lock ↗</a>
 </nav>
 
 <!-- ================= CHANGE BANNER ================= -->
@@ -252,6 +253,15 @@
     <b>105.6 tok/s vs 51.7</b> and cut turn latency <b>6.85 s → 2.72 s (2.5×)</b> with clean tool‑calls — so it's now the harness.
     And the <b>Qwen3.8‑27B coder gained its built‑in MTP head</b>: <b>11.6 → 30.4 tok/s (2.6×)</b>, tool‑calls intact, on our own v0.26 image (no third‑party build).
     <span style="color:var(--sub)">Details in <a href="recipes/qwen38-27b-dense-optimization.md">Recipe 02</a>. Nemotron kept cached for rollback. Hat‑tip <a href="https://github.com/drowzeys/keys-vLLm.0.27-Qwen3.8-NVFP4-MTP3-Single-DGX-Spark">@drowzeys</a> & @eugr for the MTP‑on‑Spark lead.</span>
+  </div>
+</div>
+
+<!-- ================= REMOTE LOCK CARD ================= -->
+<div style="max-width:1180px;margin:22px auto 0;padding:0 22px">
+  <div style="background:linear-gradient(100deg,rgba(118,185,0,.10),rgba(139,109,255,.10));border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:14px;padding:16px 20px;font-size:14.5px;line-height:1.55">
+    <b style="color:var(--violet,var(--nv2));letter-spacing:.04em">🔐 Also built: a $10 remote lock</b><br>
+    A BLE-only August smart lock controlled over WiFi via an ESP32‑C6 Bluetooth proxy + Home Assistant — no subscription bridge.
+    <a href="remotelock.html">Full writeup →</a>
   </div>
 </div>
 
