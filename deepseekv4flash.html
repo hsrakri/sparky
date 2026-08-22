@@ -304,6 +304,8 @@ vllm serve <span class="vl">DeepSeek-V4-Flash-0731</span> \
             <tr><td>vLLM CPU, head — idle</td><td class="num">3.4%</td><td>quiet</td></tr>
             <tr><td>vLLM CPU, head — under load</td><td class="num"><span class="r">377%</span></td><td>≈ 4 cores spinning</td></tr>
             <tr><td>SoC temperature, head — load</td><td class="num"><span class="r">86 °C</span></td><td>GPU only ~42 W / 66 °C</td></tr>
+            <tr><td>Spec-decode acceptance (MTP-5)</td><td class="num"><span class="fig">74.2%</span></td><td>drafter guesses that survive verification</td></tr>
+            <tr><td>Long-context quality (RULER-lite)</td><td class="num"><span class="g">12 / 12</span></td><td>8k · 32k · 131k — retrieval, tracking, aggregation</td></tr>
           </tbody>
         </table>
         <div class="foot">The GPUs sipped ~42 W (head) and ~34 W (worker) — yet the package ran hot. The culprit was the processor, not the accelerator.</div>
