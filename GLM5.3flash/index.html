@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GLM-5.3-Flash on 2× DGX Spark — the whole story</title>
+<style>
+  :root{
+    --bg:#0b0f1a; --bg2:#111827; --card:#151d2e; --card2:#1b2540;
+    --ink:#e8edf6; --sub:#93a0b4; --line:#243050;
+    --grn:#34d399; --yel:#fbbf24; --red:#f87171; --blu:#60a5fa; --pur:#c084fc;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif}
+  a{color:var(--blu);text-decoration:none} a:hover{text-decoration:underline}
+  .wrap{max-width:980px;margin:0 auto;padding:0 20px}
+  header{padding:64px 0 36px;text-align:center;background:
+    radial-gradient(1000px 400px at 50% -10%, #1d2a4d55, transparent), var(--bg)}
+  h1{font-size:clamp(28px,5vw,44px);line-height:1.15}
+  h1 .glow{background:linear-gradient(90deg,var(--blu),var(--pur));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{color:var(--sub);margin-top:10px;font-size:17px}
+  .statbar{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin:30px 0 6px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 18px;min-width:130px;transition:transform .15s}
+  .stat:hover{transform:translateY(-3px)}
+  .stat b{display:block;font-size:24px;color:var(--grn)}
+  .stat span{font-size:12.5px;color:var(--sub)}
+  nav{position:sticky;top:0;background:#0b0f1aee;backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:9}
+  nav .wrap{display:flex;gap:4px;overflow-x:auto;padding:10px 20px}
+  nav a{color:var(--sub);padding:6px 12px;border-radius:9px;font-size:14px;white-space:nowrap}
+  nav a:hover{background:var(--card);color:var(--ink);text-decoration:none}
+  section{padding:44px 0 8px}
+  h2{font-size:26px;margin-bottom:6px}
+  h2 .n{color:var(--blu);font-family:ui-monospace,monospace;font-size:20px;margin-right:8px}
+  .lead{color:var(--sub);margin-bottom:22px;max-width:760px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;margin:14px 0}
+  details.card{cursor:pointer} details.card[open]{background:var(--card2)}
+  details.card summary{font-weight:600;font-size:16.5px;list-style:none;display:flex;gap:10px;align-items:center}
+  details.card summary::before{content:"▸";color:var(--blu);transition:transform .2s}
+  details.card[open] summary::before{transform:rotate(90deg)}
+  details.card .body{margin-top:12px;color:#c7d0de;font-size:15px}
+  .pill{font-size:11.5px;padding:2px 9px;border-radius:99px;border:1px solid var(--line);color:var(--sub)}
+  .pill.ok{color:var(--grn);border-color:#1d5c44} .pill.bad{color:var(--red);border-color:#6b2a2a} .pill.warn{color:var(--yel);border-color:#6b542a}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14.5px}
+  th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line)}
+  th{color:var(--sub);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+  .tablewrap{overflow-x:auto}
+  code,.mono{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13.5px;background:#0d1526;border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#a5d0ff}
+  pre{background:#0d1526;border:1px solid var(--line);border-radius:12px;padding:16px;overflow-x:auto;margin:12px 0;font-size:13px;line-height:1.5;color:#bcd3f2}
+  .lane{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  @media(max-width:640px){.lane{grid-template-columns:1fr}}
+  .lanebox{border-radius:14px;padding:16px;border:1px solid var(--line)}
+  .lanebox h4{font-size:15px;margin-bottom:6px}
+  .lanebox p{font-size:13.5px;color:var(--sub)}
+  .agent{background:linear-gradient(180deg,#12203a,#0f1830);border-color:#28437a}
+  .coder{background:linear-gradient(180deg,#132b22,#0f1f1a);border-color:#1d5c44}
+  .arrow{ text-align:center;color:var(--sub);font-size:13px;padding:4px 0}
+  .bars{display:flex;flex-direction:column;gap:9px;margin:14px 0}
+  .bar{display:grid;grid-template-columns:170px 1fr 74px;align-items:center;gap:10px;font-size:13.5px}
+  .bar .track{background:#0d1526;border-radius:99px;height:16px;overflow:hidden}
+  .bar .fill{height:100%;border-radius:99px;transition:width 1s ease}
+  .lesson{border-left:3px solid var(--pur)}
+  footer{padding:44px 0 60px;color:var(--sub);font-size:13.5px;text-align:center}
+  .fade{opacity:0;transform:translateY(14px);transition:opacity .5s,transform .5s}
+  .fade.in{opacity:1;transform:none}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>Running a <span class="glow">320-billion-parameter</span> model in a home lab</h1>
+    <p class="tag">GLM-5.3-Flash on 2× NVIDIA DGX Spark — bring-up, tuning, a coding factory, and thermal engineering.<br>Everything below was measured on this cluster, failures included.</p>
+    <div class="statbar">
+      <div class="stat"><b>320B</b><span>params (18B active MoE)</span></div>
+      <div class="stat"><b>2×128 GB</b><span>DGX Spark (GB10)</span></div>
+      <div class="stat"><b>61.7 tok/s</b><span>structured decode</span></div>
+      <div class="stat"><b>705</b><span>AI-authored commits</span></div>
+      <div class="stat"><b>10.4 M</b><span>tokens/day measured</span></div>
+    </div>
+  </div>
+</header>
+
+<nav><div class="wrap">
+  <a href="#saga">① The bring-up saga</a>
+  <a href="#quant">② Picking the weights</a>
+  <a href="#lanes">③ Two lanes, one brain</a>
+  <a href="#factory">④ The coding factory</a>
+  <a href="#thermal">⑤ Thermal engineering</a>
+  <a href="#lessons">⑥ Lessons</a>
+</div></nav>
+
+<div class="wrap">
+
+<section id="saga" class="fade">
+  <h2><span class="n">①</span>The bring-up saga (5 failures → a live model)</h2>
+  <p class="lead">Day-0 models on day-0 hardware means every layer of the stack can betray you.
+  Click each attempt — the failures taught us exactly what the success needed.</p>
+
+  <details class="card"><summary>Attempt 1 — Qwen3.8-Flash-Next on SGLang <span class="pill bad">blocked</span></summary>
+    <div class="body">Got all the way to a live endpoint: both nodes loaded, caches allocated, Uvicorn serving. The first real inference timed out and killed the scheduler. Along the way we learned: CUTLASS &amp; CuteDSL FP4 kernels <b>abort on GB10 (sm_121)</b> — only the <code>marlin</code> kernel runs, and it repacks weights at ~2× memory. Day-old engine, last-mile failure. Reverted cleanly.</div>
+  </details>
+  <details class="card"><summary>Attempt 2 — GLM-5.3-Flash NVFP4, first recipe <span class="pill bad">OOM</span></summary>
+    <div class="body">A 181 GB NVFP4 quant across 2×128 GB looks fine on paper — until marlin's repack overhead lands. <code>NVRM: Out of memory</code> with ~117 GB free per node. A knife-edge fit that fit the author's kit and not ours. Lesson: on unified memory, <i>your</i> free RAM is the spec that matters.</div>
+  </details>
+  <details class="card"><summary>Attempt 3 — the patched-image recipe <span class="pill ok">WORKED</span></summary>
+    <div class="body">A community kit (tonyd2wild) that had already found and fixed <b>seven day-0 bugs</b> across vLLM/FlashInfer for this exact hardware, plus an <b>InstantTensor</b> loader that streams 181 GB in ~85 s at 3 GB/s <i>and</i> bypasses the page-cache behavior behind the earlier OOM. First token minutes later. The lesson that pays forever: <b>find the person who already fought your hardware.</b></div>
+  </details>
+  <details class="card"><summary>Attempt 4 — DFlash2 speculative decoding <span class="pill ok">2.15×</span></summary>
+    <div class="body">A 2.3 GB block-diffusion drafter guesses 7 tokens per step; the big model verifies them in one pass. Structured output (lists, code, tool calls — what agents actually emit) went from ~22 to <b>55–62 tok/s</b>. Prose gains less (~27 tok/s) — the drafter predicts natural text worse. Costs ~zero extra KV.</div>
+  </details>
+  <details class="card"><summary>Attempt 5 — the thinking bug <span class="pill warn">25× fix</span></summary>
+    <div class="body">GLM-5.3 defaults <code>reasoning_effort</code> to <b>max</b>. A simple question burned 33 s and 2,600 characters of hidden reasoning — then returned an <i>empty</i> answer (budget exhausted). Setting effort to <code>low</code> for chat: same question in <b>1.3 s</b>. One default, 25× latency. We now route: low effort for conversation, high + thinking for delegated hard work.</div>
+  </details>
+</section>
+
+<section id="quant" class="fade">
+  <h2><span class="n">②</span>Picking the weights: the quality ladder</h2>
+  <p class="lead">We started on NVFP4 and migrated to EXL3 4-bit. KLD (divergence vs the full-precision model — lower is better) tells the story better than vibes:</p>
+  <div class="bars" id="kldbars">
+    <div class="bar"><span>Official FP8 · 328 GB</span><div class="track"><div class="fill" style="background:var(--grn);width:0" data-w="34%"></div></div><span class="mono">0.0206</span></div>
+    <div class="bar"><span><b>EXL3 4bpw · 164 GB</b></span><div class="track"><div class="fill" style="background:var(--blu);width:0" data-w="41%"></div></div><span class="mono">0.0246</span></div>
+    <div class="bar"><span>NVFP4 · 181 GB</span><div class="track"><div class="fill" style="background:var(--red);width:0" data-w="100%"></div></div><span class="mono">0.0605</span></div>
+  </div>
+  <div class="card">EXL3 4bpw lands <b>within 0.004 nats of native FP8 at 54% of the bytes</b> — and 2.5× more faithful than the NVFP4 we started on. Smaller <i>and</i> better. The migration also unlocked a <b>900 K-token context</b> with a <b>990,659-token KV pool</b> (fp8, MLA) on the same two boxes. Current serving config trades context (262 K) for scheduler throughput — see §⑥.</div>
+</section>
+
+<section id="lanes" class="fade">
+  <h2><span class="n">③</span>Two lanes, one brain</h2>
+  <p class="lead">One engine can't be cloned (2 × 164 GB doesn't fit), and tensor-parallel already balances the GPUs perfectly. What <i>isn't</i> balanced is workload priority: an interactive assistant shares the engine with long batch coding jobs. So: one engine, one shared KV pool, two QoS lanes.</p>
+  <div class="lane">
+    <div class="lanebox agent"><h4>🗣️ Agent lane · :8891 (head)</h4>
+      <p>priority 0 · reasoning_effort <b>low</b> → snappy voice/chat replies. Measured 0.6–2.8 s under full coding load.</p></div>
+    <div class="lanebox coder"><h4>⚙️ Coding lane · :8892 (worker)</h4>
+      <p>priority 10 · reasoning_effort <b>high</b> + thinking → deep work for the code loops, big token budgets.</p></div>
+  </div>
+  <div class="arrow">▼ both forward into ▼</div>
+  <div class="card" style="text-align:center">vLLM · TP=2 over 200 Gb ConnectX · shared KV pool<br>
+  <span class="pill">caller-supplied values always win — lanes only fill gaps</span></div>
+  <div class="card">Why shared beats split: either lane can burst to the <i>full</i> pool when the other is idle. Split pools strand capacity. The lanes are ~80 lines of stdlib Python each; the intelligence stays in the engine's scheduler.</div>
+</section>
+
+<section id="factory" class="fade">
+  <h2><span class="n">④</span>The coding factory: 705 commits and counting</h2>
+  <p class="lead">The model doesn't just chat — it works. Four autonomous loops feed the coding lane around the clock. Every change passes a gate or gets reverted; nothing merges broken.</p>
+  <div class="tablewrap"><table>
+    <tr><th>Loop</th><th>Target</th><th>Gate</th><th>Commits</th></tr>
+    <tr><td>demos</td><td>137 student-project web demos</td><td>HTML validity + no-network + secret scan</td><td class="mono">189</td></tr>
+    <tr><td>nobonk</td><td>Android safety app (Kotlin)</td><td><b>full unit-test suite must stay green</b></td><td class="mono">188</td></tr>
+    <tr><td>portfolio</td><td>PWA apps (JS/HTML)</td><td>type-aware: <code>node --check</code> / structure</td><td class="mono">326</td></tr>
+    <tr><td>spinescout</td><td>new scoliosis-screening app</td><td>task-driven: gradle build + tests</td><td class="mono">2+</td></tr>
+  </table></div>
+  <div class="card">Throughput while all loops run: 2–3 concurrent requests batched by the engine, agent lane still sub-3-seconds. A watchdog restarts dead loops, respawns lanes, and — the underrated one — alerts when a loop is <i>alive but unproductive</i> (running ≠ committing).</div>
+</section>
+
+<section id="thermal" class="fade">
+  <h2><span class="n">⑤</span>Thermal engineering: chasing 90 °C</h2>
+  <p class="lead">Running inference 24/7 made the head node average 89–90 °C. Diagnosis before levers: <i>where</i> is the heat?</p>
+  <div class="tablewrap"><table>
+    <tr><th>Finding</th><th>Evidence</th></tr>
+    <tr><td>Governor pinned all 20 Grace cores at max, 24/7</td><td><code>performance</code> governor; idle cores at 2.8 GHz doing nothing</td></tr>
+    <tr><td>Fast cores boost to 3.9 GHz under load</td><td>per-policy <code>cpuinfo_max_freq</code> — invisible if you only read cpu0</td></tr>
+    <tr><td>GPU at ~96% util is the floor heat</td><td>GPU die 70 °C, 96%, ~33 W — soaks SoC zones to ~84 °C</td></tr>
+  </table></div>
+  <div class="bars">
+    <div class="bar"><span>Before (perf governor)</span><div class="track"><div class="fill" style="background:var(--red);width:0" data-w="97%"></div></div><span class="mono">89–90 °C</span></div>
+    <div class="bar"><span>schedutil</span><div class="track"><div class="fill" style="background:var(--yel);width:0" data-w="90%"></div></div><span class="mono">83–84 °C</span></div>
+    <div class="bar"><span>+ 3.3 GHz boost cap</span><div class="track"><div class="fill" style="background:var(--yel);width:0" data-w="88%"></div></div><span class="mono">~84 °C under load</span></div>
+    <div class="bar"><span>idle cores now</span><div class="track"><div class="fill" style="background:var(--grn);width:0" data-w="12%"></div></div><span class="mono">338 MHz</span></div>
+  </div>
+  <div class="card">
+    <b>The honest result:</b> the CPU levers removed the waste heat (one zone −9 °C, idle cores 2.8 GHz → 338 MHz, spikes gone) and cost ~nothing — decode is GPU-bound.
+    But the remaining ~84 °C <i>is the workload</i>: a GPU generating tokens around the clock. That's inside GB10 operating limits; pushing lower means pacing the loops (duty-cycle), not more CPU tricks. The settings re-assert after reboot via the watchdog.
+  </div>
+  <pre># the whole fix, applied via a privileged container (no sudo on the box)
+for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo schedutil > $g; done
+# cap only the 3.9 GHz-capable policies at 3.3 GHz; efficiency cores untouched
+for p in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do
+  hw=$(cat ${p%scaling_max_freq}cpuinfo_max_freq)
+  [ "$hw" -gt 3300000 ] && echo 3300000 > "$p"
+done</pre>
+</section>
+
+<section id="lessons" class="fade">
+  <h2><span class="n">⑥</span>Lessons we paid for (so you don't have to)</h2>
+  <details class="card lesson"><summary>reasoning_effort defaults to MAX</summary>
+    <div class="body">GLM-5.3 thinks as hard as it can unless told otherwise. Interactive traffic must set <code>reasoning_effort: low</code> (25× latency difference) — keep max for genuinely hard delegated work.</div></details>
+  <details class="card lesson"><summary>Full-file rewrites are output-heavy — don't think hard at them</summary>
+    <div class="body">High effort on a rewrite task burned the whole 16 K-token budget on reasoning and returned zero code. Effort should match task <i>shape</i>: deep for hard reasoning, low for bulk generation.</div></details>
+  <details class="card lesson"><summary>Generation-over-editing bias (the model's own diagnosis)</summary>
+    <div class="body">Asked why it created <code>build.gradle</code> next to an existing <code>build.gradle.kts</code>, the model answered: training priors favor generating a fresh canonical file over editing what exists — "the same prior kept winning." The fix it prescribed for itself now leads every task prompt: <i>edit in place; a new file needs proof no equivalent exists.</i></div></details>
+  <details class="card lesson"><summary>Hybrid-attention models cache in pages, not tokens</summary>
+    <div class="body">GLM-5.3's KDA linear-attention layers checkpoint state only on 3584-token page boundaries. If the scheduler chunk (<code>max-num-batched-tokens</code>) isn't page-aligned, prefix caching silently reports <b>0%</b> — and one config knob isn't enough; the fix needs engine patches. Know your model's cache granularity.</div></details>
+  <details class="card lesson"><summary>pkill -f matches your own command line</summary>
+    <div class="body">A deploy script that greps for a process name will find — and kill — the SSH shell carrying that name as an argument. Write <code>pkill -f "name[.]py"</code>: the bracket class can't match its own literal text.</div></details>
+  <details class="card lesson"><summary>Never git-stash inside automation</summary>
+    <div class="body"><code>git stash --include-untracked</code> + <code>drop</code> in a loop deleted the loop's own untracked scripts on its first pass. Automation backs up with <code>cp</code>; stash is for humans.</div></details>
+  <details class="card lesson"><summary>Liveness ≠ productivity</summary>
+    <div class="body">A loop can run all night committing nothing (every job timing out). Watchdogs must alert on <i>output</i> (commit count stalling), not process health.</div></details>
+</section>
+
+<footer>
+  Measured on kpopsparky + spark-5326 (2× DGX Spark, GB10, ConnectX-7) · engine vLLM TP=2 ·
+  weights <a href="https://huggingface.co/brandonmusic/GLM-5.3-Flash-tr3-4bpw">brandonmusic EXL3 4bpw</a> ·
+  serving kit by <a href="https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks">MiaAI-Lab</a> ·
+  day-0 GB10 fixes by <a href="https://github.com/tonyd2wild/GLM-5.3-Flash-NVFP4-DFlash2-2x-DGX-Spark">tonyd2wild</a> ·
+  drafter by <a href="https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2">incoai</a><br>
+  <a href="../index.html">← back to sparky</a> · built by hsrakri with krishavh · story drafted with the model it describes
+</footer>
+
+</div>
+
+<script>
+// gentle scroll-in + animated bars — no libraries
+const io = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) {
+    e.target.classList.add('in');
+    e.target.querySelectorAll('.fill').forEach(f => f.style.width = f.dataset.w);
+    io.unobserve(e.target);
+  }
+}), {threshold: .15});
+document.querySelectorAll('section').forEach(s => io.observe(s));
+</script>
+</body>
+</html>
