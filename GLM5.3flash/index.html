@@ -69,13 +69,13 @@
 <header>
   <div class="wrap">
     <h1>Running a <span class="glow">320-billion-parameter</span> model in a home lab</h1>
-    <p class="tag">GLM-5.3-Flash on 2× NVIDIA DGX Spark — bring-up, tuning, a coding factory, and thermal engineering.<br>Everything below was measured on this cluster, failures included.</p>
+    <p class="tag">GLM-5.3-Flash on 2× NVIDIA DGX Spark — bring-up, tuning, a two-lane serving design, and thermal engineering.<br>Everything below was measured on this cluster, failures included.</p>
     <div class="statbar">
       <div class="stat"><b>320B</b><span>params (18B active MoE)</span></div>
       <div class="stat"><b>2×128 GB</b><span>DGX Spark (GB10)</span></div>
       <div class="stat"><b>61.7 tok/s</b><span>structured decode</span></div>
-      <div class="stat"><b>705</b><span>AI-authored commits</span></div>
-      <div class="stat"><b>10.4 M</b><span>tokens/day measured</span></div>
+      <div class="stat"><b>900 K</b><span>token context</span></div>
+      <div class="stat"><b>990 K</b><span>KV-pool tokens</span></div>
     </div>
   </div>
 </header>
@@ -84,9 +84,8 @@
   <a href="#saga">① The bring-up saga</a>
   <a href="#quant">② Picking the weights</a>
   <a href="#lanes">③ Two lanes, one brain</a>
-  <a href="#factory">④ The coding factory</a>
-  <a href="#thermal">⑤ Thermal engineering</a>
-  <a href="#lessons">⑥ Lessons</a>
+  <a href="#thermal">④ Thermal engineering</a>
+  <a href="#lessons">⑤ Lessons</a>
 </div></nav>
 
 <div class="wrap">
@@ -126,12 +125,12 @@
 
 <section id="lanes" class="fade">
   <h2><span class="n">③</span>Two lanes, one brain</h2>
-  <p class="lead">One engine can't be cloned (2 × 164 GB doesn't fit), and tensor-parallel already balances the GPUs perfectly. What <i>isn't</i> balanced is workload priority: an interactive assistant shares the engine with long batch coding jobs. So: one engine, one shared KV pool, two QoS lanes.</p>
+  <p class="lead">One engine can't be cloned (2 × 164 GB doesn't fit), and tensor-parallel already balances the GPUs perfectly. What <i>isn't</i> balanced is workload priority: an interactive assistant shares the engine with long-running batch jobs. So: one engine, one shared KV pool, two QoS lanes.</p>
   <div class="lane">
     <div class="lanebox agent"><h4>🗣️ Agent lane · :8891 (head)</h4>
-      <p>priority 0 · reasoning_effort <b>low</b> → snappy voice/chat replies. Measured 0.6–2.8 s under full coding load.</p></div>
-    <div class="lanebox coder"><h4>⚙️ Coding lane · :8892 (worker)</h4>
-      <p>priority 10 · reasoning_effort <b>high</b> + thinking → deep work for the code loops, big token budgets.</p></div>
+      <p>priority 0 · reasoning_effort <b>low</b> → snappy voice/chat replies. Measured 0.6–2.8 s while the batch lane was saturated.</p></div>
+    <div class="lanebox coder"><h4>⚙️ Batch lane · :8892 (worker)</h4>
+      <p>priority 10 · reasoning_effort <b>high</b> + thinking → deep thinking for delegated heavy work, big token budgets.</p></div>
   </div>
   <div class="arrow">▼ both forward into ▼</div>
   <div class="card" style="text-align:center">vLLM · TP=2 over 200 Gb ConnectX · shared KV pool<br>
@@ -139,21 +138,8 @@
   <div class="card">Why shared beats split: either lane can burst to the <i>full</i> pool when the other is idle. Split pools strand capacity. The lanes are ~80 lines of stdlib Python each; the intelligence stays in the engine's scheduler.</div>
 </section>
 
-<section id="factory" class="fade">
-  <h2><span class="n">④</span>The coding factory: 705 commits and counting</h2>
-  <p class="lead">The model doesn't just chat — it works. Four autonomous loops feed the coding lane around the clock. Every change passes a gate or gets reverted; nothing merges broken.</p>
-  <div class="tablewrap"><table>
-    <tr><th>Loop</th><th>Target</th><th>Gate</th><th>Commits</th></tr>
-    <tr><td>demos</td><td>137 student-project web demos</td><td>HTML validity + no-network + secret scan</td><td class="mono">189</td></tr>
-    <tr><td>nobonk</td><td>Android safety app (Kotlin)</td><td><b>full unit-test suite must stay green</b></td><td class="mono">188</td></tr>
-    <tr><td>portfolio</td><td>PWA apps (JS/HTML)</td><td>type-aware: <code>node --check</code> / structure</td><td class="mono">326</td></tr>
-    <tr><td>spinescout</td><td>new scoliosis-screening app</td><td>task-driven: gradle build + tests</td><td class="mono">2+</td></tr>
-  </table></div>
-  <div class="card">Throughput while all loops run: 2–3 concurrent requests batched by the engine, agent lane still sub-3-seconds. A watchdog restarts dead loops, respawns lanes, and — the underrated one — alerts when a loop is <i>alive but unproductive</i> (running ≠ committing).</div>
-</section>
-
 <section id="thermal" class="fade">
-  <h2><span class="n">⑤</span>Thermal engineering: chasing 90 °C</h2>
+  <h2><span class="n">④</span>Thermal engineering: chasing 90 °C</h2>
   <p class="lead">Running inference 24/7 made the head node average 89–90 °C. Diagnosis before levers: <i>where</i> is the heat?</p>
   <div class="tablewrap"><table>
     <tr><th>Finding</th><th>Evidence</th></tr>
@@ -169,7 +155,7 @@
   </div>
   <div class="card">
     <b>The honest result:</b> the CPU levers removed the waste heat (one zone −9 °C, idle cores 2.8 GHz → 338 MHz, spikes gone) and cost ~nothing — decode is GPU-bound.
-    But the remaining ~84 °C <i>is the workload</i>: a GPU generating tokens around the clock. That's inside GB10 operating limits; pushing lower means pacing the loops (duty-cycle), not more CPU tricks. The settings re-assert after reboot via the watchdog.
+    But the remaining ~84 °C <i>is the workload</i>: a GPU generating tokens around the clock. That's inside GB10 operating limits; pushing lower means duty-cycling the workload, not more CPU tricks. The settings re-assert after reboot via the watchdog.
   </div>
   <pre># the whole fix, applied via a privileged container (no sudo on the box)
 for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo schedutil > $g; done
@@ -181,7 +167,7 @@ done</pre>
 </section>
 
 <section id="lessons" class="fade">
-  <h2><span class="n">⑥</span>Lessons we paid for (so you don't have to)</h2>
+  <h2><span class="n">⑤</span>Lessons we paid for (so you don't have to)</h2>
   <details class="card lesson"><summary>reasoning_effort defaults to MAX</summary>
     <div class="body">GLM-5.3 thinks as hard as it can unless told otherwise. Interactive traffic must set <code>reasoning_effort: low</code> (25× latency difference) — keep max for genuinely hard delegated work.</div></details>
   <details class="card lesson"><summary>Full-file rewrites are output-heavy — don't think hard at them</summary>
@@ -192,10 +178,6 @@ done</pre>
     <div class="body">GLM-5.3's KDA linear-attention layers checkpoint state only on 3584-token page boundaries. If the scheduler chunk (<code>max-num-batched-tokens</code>) isn't page-aligned, prefix caching silently reports <b>0%</b> — and one config knob isn't enough; the fix needs engine patches. Know your model's cache granularity.</div></details>
   <details class="card lesson"><summary>pkill -f matches your own command line</summary>
     <div class="body">A deploy script that greps for a process name will find — and kill — the SSH shell carrying that name as an argument. Write <code>pkill -f "name[.]py"</code>: the bracket class can't match its own literal text.</div></details>
-  <details class="card lesson"><summary>Never git-stash inside automation</summary>
-    <div class="body"><code>git stash --include-untracked</code> + <code>drop</code> in a loop deleted the loop's own untracked scripts on its first pass. Automation backs up with <code>cp</code>; stash is for humans.</div></details>
-  <details class="card lesson"><summary>Liveness ≠ productivity</summary>
-    <div class="body">A loop can run all night committing nothing (every job timing out). Watchdogs must alert on <i>output</i> (commit count stalling), not process health.</div></details>
 </section>
 
 <footer>
