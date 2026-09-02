@@ -145,17 +145,19 @@
     <tr><th>Finding</th><th>Evidence</th></tr>
     <tr><td>Governor pinned all 20 Grace cores at max, 24/7</td><td><code>performance</code> governor; idle cores at 2.8 GHz doing nothing</td></tr>
     <tr><td>Fast cores boost to 3.9 GHz under load</td><td>per-policy <code>cpuinfo_max_freq</code> — invisible if you only read cpu0</td></tr>
-    <tr><td>GPU at ~96% util is the floor heat</td><td>GPU die 70 °C, 96%, ~33 W — soaks SoC zones to ~84 °C</td></tr>
+    <tr><td>GPU at ~96% util is the floor heat</td><td>GPU die 65 °C, 96%, ~33 W — soaks SoC zones</td></tr>
+    <tr><td><b>Busy-wait polling burned ~2 cores</b></td><td><code>Worker_TP</code> 198% CPU with a 1 s spin window — the single biggest lever</td></tr>
   </table></div>
   <div class="bars">
-    <div class="bar"><span>Before (perf governor)</span><div class="track"><div class="fill" style="background:var(--red);width:0" data-w="97%"></div></div><span class="mono">89–90 °C</span></div>
+    <div class="bar"><span>Before (perf gov, 1 s spin)</span><div class="track"><div class="fill" style="background:var(--red);width:0" data-w="97%"></div></div><span class="mono">89–90 °C</span></div>
     <div class="bar"><span>schedutil</span><div class="track"><div class="fill" style="background:var(--yel);width:0" data-w="90%"></div></div><span class="mono">83–84 °C</span></div>
     <div class="bar"><span>+ 3.3 GHz boost cap</span><div class="track"><div class="fill" style="background:var(--yel);width:0" data-w="88%"></div></div><span class="mono">~84 °C under load</span></div>
+    <div class="bar"><span><b>+ spinwait 1s → 16 ms</b></span><div class="track"><div class="fill" style="background:var(--grn);width:0" data-w="74%"></div></div><span class="mono">74 °C avg</span></div>
     <div class="bar"><span>idle cores now</span><div class="track"><div class="fill" style="background:var(--grn);width:0" data-w="12%"></div></div><span class="mono">338 MHz</span></div>
   </div>
   <div class="card">
     <b>The honest result:</b> the CPU levers removed the waste heat (one zone −9 °C, idle cores 2.8 GHz → 338 MHz, spikes gone) and cost ~nothing — decode is GPU-bound.
-    But the remaining ~84 °C <i>is the workload</i>: a GPU generating tokens around the clock. That's inside GB10 operating limits; pushing lower means duty-cycling the workload, not more CPU tricks. The settings re-assert after reboot via the watchdog.
+    Then the real culprit surfaced: <code>VLLM::Worker_TP</code> sat at <b>198% CPU</b> — nearly two cores <i>busy-waiting</i>. vLLM's SpinCondition reader polls with a 1-second window by default; the upstream TP=2 sweep selected <b>16 ms</b>. One env var (<code>GLM53_SPINWAIT_MS=16</code>) took the head node from a <b>93.7 °C peak to 80.3 °C (74 °C average)</b> under identical 96% GPU load, with worker CPU dropping to 123% — and no throughput cost. Lesson: before blaming the workload, check what your stack is doing while it <i>waits</i>. Settings re-assert after reboot via the watchdog.
   </div>
   <pre># the whole fix, applied via a privileged container (no sudo on the box)
 for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo schedutil > $g; done
