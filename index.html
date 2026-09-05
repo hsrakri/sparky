@@ -1,522 +1,693 @@
 <!doctype html>
-<html lang="en">
-<head>
+<html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>sparky — two brains, one DGX Spark</title>
-<meta name="description" content="Real recipes and overnight benchmarks from running a two-model agent stack (Nemotron orchestrator + Qwen coder) on a single NVIDIA DGX Spark GB10.">
-<meta property="og:title" content="sparky — two brains, one DGX Spark">
-<meta property="og:description" content="Co-locating 2×30B models, dense-27B roofline engineering, and 225 overnight agent tasks — every number measured, every crash documented.">
+<title>sparky — a 320B model in a home lab</title>
+<meta name="description" content="How GLM-5.3-Flash (320B MoE) runs on two NVIDIA DGX Sparks in a home lab: EXL3 quantization, tensor parallelism over ConnectX-7, DFlash2 speculative decoding, two-lane QoS, prefix caching and thermal engineering. Every number measured.">
+<meta property="og:title" content="sparky — a 320B model in a home lab">
+<meta property="og:description" content="GLM-5.3-Flash, 320 billion parameters, running on two desktop-sized boxes. The full recipe, with measurements.">
+<meta name="theme-color" content="#07090d">
 <style>
-  :root{
-    --bg:#07090d; --bg2:#0b0f16; --card:#10161f; --card2:#141c27;
-    --ink:#eaf1f8; --sub:#8fa2b5; --dim:#5c6b7c;
-    --nv:#76b900; --nv2:#a4e34d; --qw:#8b6dff; --qw2:#b39dff; --amber:#ffb347;
-    --line:rgba(140,160,185,.14); --glass:rgba(16,22,31,.72);
-    --r:18px;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    background:var(--bg); color:var(--ink); line-height:1.6; overflow-x:hidden;
-  }
-  ::selection{background:rgba(118,185,0,.35)}
-  a{color:inherit}
+:root{
+  --bg:#07090d; --bg2:#0b0f16; --card:#10161f; --card2:#151d29; --line:#1f2b3d; --line2:#2b3b53;
+  --ink:#e9eef7; --sub:#93a3bd; --dim:#67788f;
+  --a:#38bdf8;   /* cyan  - spark 1 / agent lane */
+  --b:#c084fc;   /* violet - spark 2 / coding lane */
+  --g:#34d399;   /* green - good / measured */
+  --y:#fbbf24;   /* amber - caution */
+  --r:#fb7185;   /* rose  - failure */
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font:17px/1.65 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:var(--a);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+.narrow{max-width:760px}
+h2{font-size:clamp(27px,4.4vw,40px);line-height:1.15;letter-spacing:-.025em;font-weight:800}
+h3{font-size:20px;letter-spacing:-.01em;font-weight:700}
+p{color:#cbd6e6}
+.lead{font-size:19px;color:var(--sub)}
+.mono{font-family:var(--mono)}
+.tag{display:inline-flex;align-items:center;gap:7px;font:600 11.5px/1 var(--mono);letter-spacing:.16em;
+  text-transform:uppercase;color:var(--a);border:1px solid var(--line2);border-radius:99px;padding:7px 13px}
+section{padding:82px 0;position:relative;border-top:1px solid var(--line)}
+section:first-of-type{border-top:none}
+.eyebrow{font:600 12px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin-bottom:14px}
 
-  /* ---------- scroll progress ---------- */
-  #progress{position:fixed;top:0;left:0;height:3px;width:0%;z-index:60;
-    background:linear-gradient(90deg,var(--nv),var(--qw));transition:width .1s linear}
+/* ---------- nav ---------- */
+nav{position:sticky;top:0;z-index:50;background:#07090dd9;backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:8px;height:56px}
+nav .brand{font:800 17px var(--sans);letter-spacing:-.02em;margin-right:auto}
+nav .brand i{font-style:normal;background:linear-gradient(90deg,var(--a),var(--b));-webkit-background-clip:text;background-clip:text;color:transparent}
+nav a.n{color:var(--sub);font-size:13.5px;padding:7px 11px;border-radius:8px}
+nav a.n:hover{color:var(--ink);background:#ffffff0d;text-decoration:none}
+nav a.gh{border:1px solid var(--line2);border-radius:9px;color:var(--ink);font-size:13.5px;padding:7px 13px}
+@media(max-width:860px){nav a.n{display:none}}
 
-  /* ---------- nav ---------- */
-  nav{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:50;
-    display:flex;gap:2px;padding:6px;border-radius:999px;
-    background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-    border:1px solid var(--line);box-shadow:0 8px 30px rgba(0,0,0,.4)}
-  nav a{font-size:13px;font-weight:600;color:var(--sub);text-decoration:none;
-    padding:7px 14px;border-radius:999px;white-space:nowrap;transition:color .2s,background .2s}
-  nav a:hover,nav a.active{color:var(--ink);background:rgba(140,160,185,.12)}
-  @media(max-width:640px){nav{max-width:94vw;overflow-x:auto;scrollbar-width:none}nav::-webkit-scrollbar{display:none}}
+/* ---------- hero ---------- */
+header{position:relative;padding:96px 0 74px;overflow:hidden}
+header:before{content:"";position:absolute;inset:-30% -10% auto;height:640px;pointer-events:none;
+  background:radial-gradient(720px 300px at 26% 40%,#38bdf81f,transparent 70%),
+             radial-gradient(720px 300px at 74% 60%,#c084fc1c,transparent 70%)}
+#grid{position:absolute;inset:0;opacity:.5;pointer-events:none;
+  background-image:linear-gradient(#ffffff08 1px,transparent 1px),linear-gradient(90deg,#ffffff08 1px,transparent 1px);
+  background-size:52px 52px;mask-image:radial-gradient(closest-side at 50% 30%,#000,transparent)}
+h1{font-size:clamp(40px,7.6vw,74px);line-height:1.03;letter-spacing:-.038em;font-weight:850;position:relative}
+h1 span{display:block}
+h1 .hl{background:linear-gradient(96deg,var(--a),var(--b) 62%,#f0abfc);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero-sub{font-size:19.5px;color:var(--sub);max-width:640px;margin-top:22px;position:relative}
+.hero-sub b{color:var(--ink);font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:44px;position:relative}
+.stat{background:linear-gradient(180deg,var(--card),#0d131c);border:1px solid var(--line);border-radius:14px;padding:17px 16px}
+.stat .v{font:800 30px/1 var(--sans);letter-spacing:-.03em}
+.stat .v small{font-size:15px;font-weight:600;color:var(--sub);margin-left:2px}
+.stat .l{font:600 11px/1.4 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-top:8px}
+@media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
 
-  /* ---------- hero ---------- */
-  .hero{position:relative;min-height:100svh;display:flex;flex-direction:column;
-    justify-content:center;align-items:center;text-align:center;padding:96px 20px 60px;isolation:isolate}
-  .orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;z-index:-1;will-change:transform}
-  .orb.g{width:52vmax;height:52vmax;background:radial-gradient(circle,rgba(118,185,0,.30),transparent 65%);top:-18vmax;right:-14vmax;animation:drift1 26s ease-in-out infinite alternate}
-  .orb.v{width:46vmax;height:46vmax;background:radial-gradient(circle,rgba(139,109,255,.30),transparent 65%);bottom:-16vmax;left:-12vmax;animation:drift2 32s ease-in-out infinite alternate}
-  @keyframes drift1{to{transform:translate(-9vmax,7vmax) scale(1.12)}}
-  @keyframes drift2{to{transform:translate(8vmax,-6vmax) scale(1.08)}}
-  .grid-bg{position:absolute;inset:0;z-index:-2;opacity:.5;
-    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
-    background-size:56px 56px;
-    -webkit-mask-image:radial-gradient(ellipse 90% 70% at 50% 40%,#000 30%,transparent 75%);
-    mask-image:radial-gradient(ellipse 90% 70% at 50% 40%,#000 30%,transparent 75%)}
-  .kicker{display:inline-flex;align-items:center;gap:9px;font-size:13px;letter-spacing:.16em;
-    text-transform:uppercase;font-weight:700;color:var(--sub);
-    border:1px solid var(--line);border-radius:999px;padding:8px 18px;background:var(--glass);
-    backdrop-filter:blur(10px)}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--nv);box-shadow:0 0 12px var(--nv);animation:pulse 2.2s infinite}
-  @keyframes pulse{50%{opacity:.35}}
-  h1{font-size:clamp(44px,9vw,104px);line-height:1.02;font-weight:800;letter-spacing:-.03em;margin:26px 0 8px}
-  .grad{background:linear-gradient(92deg,var(--nv2) 5%,var(--nv) 30%,var(--qw) 70%,var(--qw2) 95%);
-    background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
-    animation:sheen 7s ease-in-out infinite alternate}
-  @keyframes sheen{to{background-position:100% 0}}
-  .tagline{font-size:clamp(17px,2.4vw,22px);color:var(--sub);max-width:640px;margin:14px auto 40px}
-  .tagline b{color:var(--ink)}
-  .statrow{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;max-width:820px}
-  .stat{background:var(--glass);border:1px solid var(--line);border-radius:var(--r);
-    padding:18px 26px;min-width:150px;backdrop-filter:blur(10px)}
-  .stat .n{font-size:clamp(26px,4.5vw,38px);font-weight:800;
-    font-variant-numeric:tabular-nums;background:linear-gradient(90deg,var(--nv2),var(--qw2));
-    -webkit-background-clip:text;background-clip:text;color:transparent}
-  .stat .l{font-size:12.5px;color:var(--sub);letter-spacing:.08em;text-transform:uppercase;font-weight:600;margin-top:2px}
-  .scrollhint{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);color:var(--dim);font-size:22px;animation:bob 1.8s ease-in-out infinite}
-  @keyframes bob{50%{transform:translate(-50%,8px)}}
+/* ---------- generic cards ---------- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:820px){.grid2,.grid3{grid-template-columns:1fr}}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:14.5px}
+.kv:last-child{border:none}
+.kv span:first-child{color:var(--sub)}
+.kv span:last-child{font-family:var(--mono);color:var(--ink)}
+.note{font-size:14px;color:var(--dim);font-style:italic}
+code{font-family:var(--mono);font-size:.9em;background:#ffffff0f;border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:#d7e3f5}
+pre{background:#080c12;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow-x:auto;
+  font-family:var(--mono);font-size:13.5px;line-height:1.75;color:#cfe0f5}
+pre .c{color:var(--dim)}
+pre .k{color:var(--b)}
+pre .s{color:var(--g)}
 
-  /* ---------- shared ---------- */
-  section{max-width:1060px;margin:0 auto;padding:110px 20px 30px;scroll-margin-top:70px}
-  .eyebrow{font-size:13px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;margin-bottom:12px}
-  .eyebrow.nv{color:var(--nv)} .eyebrow.qw{color:var(--qw2)} .eyebrow.am{color:var(--amber)}
-  h2{font-size:clamp(30px,5vw,48px);font-weight:800;letter-spacing:-.02em;line-height:1.12;margin-bottom:14px}
-  .lead{color:var(--sub);font-size:clamp(16px,2vw,18.5px);max-width:720px;margin-bottom:44px}
-  .lead b,.lead code{color:var(--ink)}
-  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;
-    background:rgba(140,160,185,.1);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
+/* ---------- fabric diagram ---------- */
+.scroller{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.scroller::-webkit-scrollbar{height:7px}
+.scroller::-webkit-scrollbar-thumb{background:#2b3b53;border-radius:4px}
+#fab{width:100%;height:auto;display:block;min-width:660px}
+#lanecv{min-width:660px}
+.swipe{display:none;font:11px var(--mono);color:var(--dim);margin-top:9px;text-align:center}
+@media(max-width:720px){.swipe{display:block}}
+.box-lbl{font:700 13px var(--mono);fill:var(--ink)}
+.box-sub{font:11px var(--mono);fill:var(--sub)}
+.pkt{opacity:.9}
 
-  .reveal{opacity:0;transform:translateY(34px);transition:opacity .7s cubic-bezier(.2,.65,.25,1),transform .7s cubic-bezier(.2,.65,.25,1)}
-  .reveal.in{opacity:1;transform:none}
-  .d1{transition-delay:.08s}.d2{transition-delay:.16s}.d3{transition-delay:.24s}.d4{transition-delay:.32s}
+/* ---------- quant ladder ---------- */
+.ladder{display:flex;flex-direction:column;gap:10px}
+.rung{display:grid;grid-template-columns:132px 1fr 92px;gap:14px;align-items:center;cursor:pointer;
+  background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px;transition:.16s}
+.rung:hover{border-color:var(--line2)}
+.rung.on{border-color:var(--a);background:var(--card2);box-shadow:0 0 0 1px #38bdf833}
+.rung.dead{opacity:.55}
+.rung .nm{font:700 14px var(--mono)}
+.rung .nm em{display:block;font:400 11px var(--sans);font-style:normal;color:var(--dim);margin-top:3px}
+.bar{height:10px;border-radius:6px;background:#ffffff0e;overflow:hidden;position:relative}
+.bar i{display:block;height:100%;border-radius:6px;transition:width .7s cubic-bezier(.2,.8,.2,1)}
+.rung .rt{text-align:right;font:700 13px var(--mono)}
+.verdict{margin-top:14px;padding:15px 17px;border-radius:12px;border:1px solid var(--line);background:#0c1119;font-size:15px}
+.verdict b{font-family:var(--mono)}
 
-  /* ---------- architecture ---------- */
-  .arch{display:grid;grid-template-columns:1fr auto 1fr;gap:0;align-items:stretch;margin:12px 0 8px}
-  .node{border-radius:var(--r);padding:26px;background:var(--card);border:1px solid var(--line);position:relative;overflow:hidden}
-  .node::before{content:"";position:absolute;inset:0;border-radius:var(--r);padding:1.5px;
-    background:linear-gradient(140deg,transparent 30%,var(--edge,var(--nv)) 50%,transparent 70%);
-    -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-    -webkit-mask-composite:xor;mask-composite:exclude;opacity:.65;
-    background-size:250% 250%;animation:borderflow 5s linear infinite}
-  @keyframes borderflow{to{background-position:250% 250%}}
-  .node.nv{--edge:var(--nv)} .node.qw{--edge:var(--qw)}
-  .node .role{font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
-  .node.nv .role{color:var(--nv2)} .node.qw .role{color:var(--qw2)}
-  .node h3{font-size:clamp(18px,2.4vw,23px);font-weight:800;margin:8px 0 4px}
-  .node .spec{color:var(--sub);font-size:14px;margin-bottom:14px}
-  .chips{display:flex;flex-wrap:wrap;gap:7px}
-  .chip{font-size:12px;color:var(--sub);border:1px solid var(--line);border-radius:999px;padding:4px 11px;background:rgba(140,160,185,.05)}
-  .link-col{display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 18px;gap:6px}
-  .flow-line{width:74px;height:2px;position:relative;overflow:hidden;background:rgba(140,160,185,.15);border-radius:2px}
-  .flow-line i{position:absolute;top:0;left:-40%;width:40%;height:100%;
-    background:linear-gradient(90deg,transparent,var(--nv2),transparent);animation:flow 1.6s linear infinite}
-  .flow-line.back i{background:linear-gradient(90deg,transparent,var(--qw2),transparent);animation:flowback 1.6s linear infinite}
-  @keyframes flow{to{left:100%}} @keyframes flowback{from{left:100%}to{left:-40%}}
-  .flow-label{font-size:11px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;font-weight:700}
-  @media(max-width:760px){.arch{grid-template-columns:1fr}.link-col{flex-direction:row;padding:16px 0}.flow-line{transform:rotate(90deg) scaleX(.7)}}
+/* ---------- lanes ---------- */
+.lanes{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px}
+@media(max-width:820px){.lanes{grid-template-columns:1fr}}
+.lane{border-radius:16px;padding:20px;border:1px solid var(--line);background:var(--card);position:relative;overflow:hidden}
+.lane:before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--lc)}
+.lane h4{font:700 17px var(--sans);display:flex;align-items:center;gap:9px}
+.lane .port{font:700 12px var(--mono);color:var(--lc);border:1px solid var(--lc);border-radius:6px;padding:2px 7px}
+.lane ul{list-style:none;margin-top:14px}
+.lane li{font-size:14.5px;color:var(--sub);padding:6px 0 6px 20px;position:relative}
+.lane li:before{content:"▸";position:absolute;left:2px;color:var(--lc)}
+.lane li b{color:var(--ink);font-family:var(--mono);font-weight:600;font-size:13.5px}
+#laneviz{margin-top:20px;background:#080c12;border:1px solid var(--line);border-radius:14px;padding:16px}
+#lanecv{width:100%;aspect-ratio:1000/340;height:auto;display:block}
+.ctrls{display:flex;gap:9px;flex-wrap:wrap;margin-top:13px}
+.btn{background:var(--card2);border:1px solid var(--line2);color:var(--ink);border-radius:9px;
+  padding:9px 15px;font:600 13.5px var(--sans);cursor:pointer;transition:.15s}
+.btn:hover{border-color:var(--a)}
+.btn.on{background:linear-gradient(90deg,var(--a),var(--b));color:#05121b;border-color:transparent}
 
-  .mem-eq{margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:24px 26px}
-  .mem-eq .eq{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:clamp(17px,3.4vw,26px);font-weight:700;
-    display:flex;flex-wrap:wrap;gap:10px;align-items:baseline}
-  .mem-eq .eq .a{color:var(--qw2)} .mem-eq .eq .b{color:var(--nv2)} .mem-eq .eq .c{color:var(--ink)} .mem-eq .eq .r{color:var(--sub);font-size:.72em;font-weight:600}
-  .membar{margin-top:16px;height:30px;border-radius:9px;overflow:hidden;display:flex;background:rgba(140,160,185,.09);border:1px solid var(--line)}
-  .membar>div{height:100%;width:0;display:flex;align-items:center;justify-content:center;
-    font-size:12px;font-weight:800;color:#06090d;letter-spacing:.03em;white-space:nowrap;
-    transition:width 1.4s cubic-bezier(.25,.7,.2,1)}
-  .membar .mq{background:linear-gradient(90deg,#a08bff,var(--qw))}
-  .membar .mn{background:linear-gradient(90deg,var(--nv2),var(--nv))}
-  .membar .mo{background:transparent;color:var(--dim);font-weight:600}
-  .in .membar .mq{width:45%}.in .membar .mn{width:42%}.in .membar .mo{width:13%}
+/* ---------- spec decode chart ---------- */
+.chart{background:#080c12;border:1px solid var(--line);border-radius:14px;padding:20px 18px 12px}
+.cbars{display:flex;align-items:flex-end;gap:10px;height:190px;margin-bottom:10px}
+.cb{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;height:100%;min-width:0}
+.cb .tk{flex:1 1 auto;width:100%;display:flex;align-items:flex-end;min-height:0}
+.cb i{width:100%;flex:none;border-radius:6px 6px 2px 2px;background:linear-gradient(180deg,var(--a),#0ea5e9);
+  transition:height .8s cubic-bezier(.2,.8,.2,1)}
+.cb.lo i{background:linear-gradient(180deg,#475569,#334155)}
+.cb b{font:700 12.5px var(--mono);color:var(--ink)}
+.cb span{font:11px var(--mono);color:var(--dim)}
 
-  /* ---------- recipe feature blocks ---------- */
-  .feature{display:grid;grid-template-columns:1.1fr .9fr;gap:34px;align-items:center;
-    background:var(--card);border:1px solid var(--line);border-radius:24px;padding:clamp(26px,4.5vw,52px);
-    position:relative;overflow:hidden;margin-bottom:34px}
-  .feature::after{content:"";position:absolute;width:60%;height:60%;border-radius:50%;filter:blur(100px);opacity:.14;pointer-events:none}
-  .feature.r1::after{background:var(--nv);top:-25%;right:-15%}
-  .feature.r2::after{background:var(--qw);bottom:-25%;left:-15%}
-  .feature .num{font-size:13px;font-weight:800;letter-spacing:.18em;color:var(--dim)}
-  .feature h3{font-size:clamp(24px,3.6vw,36px);font-weight:800;letter-spacing:-.02em;line-height:1.15;margin:10px 0 12px}
-  .feature p{color:var(--sub);font-size:15.5px;margin-bottom:18px}
-  .feature p b{color:var(--ink)}
-  .cta{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:15px;text-decoration:none;
-    padding:12px 22px;border-radius:12px;transition:transform .2s,box-shadow .2s}
-  .cta.nv{background:linear-gradient(90deg,var(--nv),#8fd426);color:#06090d}
-  .cta.qw{background:linear-gradient(90deg,var(--qw),#a48eff);color:#06090d}
-  .cta:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.45)}
-  .cta span{transition:transform .2s}.cta:hover span{transform:translateX(4px)}
-  .panel{background:var(--bg2);border:1px solid var(--line);border-radius:16px;padding:20px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;overflow:hidden}
-  .panel .t{color:var(--dim);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:12px;font-family:inherit}
-  .krow{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px dashed rgba(140,160,185,.12);font-size:12.8px}
-  .krow:last-child{border-bottom:none}
-  .krow .k{color:var(--sub)} .krow .v{color:var(--ink);font-weight:700;text-align:right}
-  .krow .v.good{color:var(--nv2)} .krow .v.bad{color:#ff7d7d} .krow .v.warn{color:var(--amber)}
-  @media(max-width:820px){.feature{grid-template-columns:1fr}}
+/* ---------- before/after ---------- */
+.ba{display:flex;flex-direction:column;gap:13px}
+.barow{display:grid;grid-template-columns:104px 1fr auto;gap:14px;align-items:center}
+.barow .bl{font:600 13px var(--mono);color:var(--sub)}
+.barow .bb{height:34px;border-radius:8px;background:#ffffff0c;overflow:hidden}
+.barow .bb i{display:block;height:100%;border-radius:8px;transition:width 1s cubic-bezier(.2,.8,.2,1)}
+.barow .bv{font:700 15px var(--mono);min-width:76px;text-align:right}
 
-  /* ---------- crash accordion ---------- */
-  details.crash{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:12px;overflow:hidden}
-  details.crash summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;padding:17px 20px;font-weight:600;font-size:15px;transition:background .2s}
-  details.crash summary::-webkit-details-marker{display:none}
-  details.crash summary:hover{background:rgba(140,160,185,.05)}
-  .crash .sev{flex-shrink:0;font-size:11px;font-weight:800;letter-spacing:.08em;padding:4px 10px;border-radius:999px;background:rgba(255,125,125,.13);color:#ff9d9d}
-  .crash .fixtag{margin-left:auto;flex-shrink:0;font-size:11px;font-weight:800;letter-spacing:.08em;padding:4px 10px;border-radius:999px;background:rgba(118,185,0,.13);color:var(--nv2)}
-  .crash .body{padding:2px 20px 20px;color:var(--sub);font-size:14.5px}
-  .crash .body code{display:block;margin:10px 0;padding:12px;white-space:pre-wrap;word-break:break-word;background:var(--bg2);font-size:12.5px;color:#ffb4b4}
-  .crash .body .fix{color:var(--ink)}
-  .crash .body .fix b{color:var(--nv2)}
-  details.crash summary .chev{margin-left:6px;color:var(--dim);transition:transform .25s}
-  details.crash[open] summary .chev{transform:rotate(90deg)}
+/* ---------- timeline ---------- */
+.tl{position:relative;padding-left:30px;margin-top:26px}
+.tl:before{content:"";position:absolute;left:8px;top:8px;bottom:8px;width:2px;
+  background:linear-gradient(180deg,var(--r),var(--y) 42%,var(--g))}
+.ev{position:relative;padding:0 0 26px 6px}
+.ev:before{content:"";position:absolute;left:-27px;top:7px;width:11px;height:11px;border-radius:50%;
+  background:var(--evc,var(--dim));box-shadow:0 0 0 4px var(--bg)}
+.ev h4{font:700 16px var(--sans);color:var(--ink)}
+.ev p{font-size:14.5px;color:var(--sub);margin-top:3px}
 
-  /* ---------- charts ---------- */
-  .chart{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:clamp(20px,3.5vw,34px);margin-bottom:26px}
-  .chart h4{font-size:13px;color:var(--sub);letter-spacing:.14em;text-transform:uppercase;font-weight:700;margin-bottom:22px}
-  .bar{display:grid;grid-template-columns:180px 1fr 86px;gap:14px;align-items:center;margin-bottom:15px}
-  .bar .lab{font-size:14px;font-weight:600;text-align:right}
-  .bar .lab small{display:block;font-weight:500;color:var(--dim);font-size:11.5px}
-  .bar .track{height:26px;background:rgba(140,160,185,.08);border-radius:8px;overflow:hidden;border:1px solid var(--line)}
-  .bar .fill{height:100%;width:0;border-radius:8px;transition:width 1.5s cubic-bezier(.22,.7,.2,1)}
-  .bar .val{font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
-  .f-qw36{background:linear-gradient(90deg,#5a48b8,var(--qw))} .f-nemo{background:linear-gradient(90deg,#4a7a08,var(--nv))}
-  .f-q38b{background:linear-gradient(90deg,#7a5cd8,#9d85f2)} .f-q38s{background:linear-gradient(90deg,var(--amber),#ffd28f)}
-.f-q38m{background:linear-gradient(90deg,var(--nv),var(--nv2))}
-  .in .w100{width:100%}
-.in .w27{width:26.7%}.in .w44{width:44%}.in .w19{width:19.4%}.in .w10{width:10.2%}
-  .chart .note{color:var(--dim);font-size:13px;margin-top:14px}
-  .chart .note b{color:var(--amber)}
-  @media(max-width:640px){.bar{grid-template-columns:1fr}.bar .lab{text-align:left}.bar .val{order:-1}}
+/* ---------- lesson cards ---------- */
+.lesson{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--lc,var(--y));
+  border-radius:0 14px 14px 0;padding:18px 20px}
+.lesson h4{font:700 16.5px var(--sans);margin-bottom:7px}
+.lesson p{font-size:14.5px;color:var(--sub)}
+.lesson .fix{margin-top:11px;font-size:13.5px;font-family:var(--mono);color:var(--g);
+  background:#34d3990f;border:1px solid #34d39926;border-radius:8px;padding:9px 12px}
 
-  .bench-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
-  @media(max-width:820px){.bench-grid{grid-template-columns:1fr}}
-  .bench{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:30px;position:relative;overflow:hidden}
-  .bench .big{font-size:clamp(44px,7vw,64px);font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
-  .bench.b1 .big{color:var(--nv2)} .bench.b2 .big{color:var(--qw2)}
-  .bench .cap{font-size:15px;font-weight:700;margin:6px 0 4px}
-  .bench .sub{color:var(--sub);font-size:14px;margin-bottom:18px}
-  .ring{position:absolute;top:24px;right:24px;width:64px;height:64px}
-  .ring svg{transform:rotate(-90deg)}
-  .ring circle{fill:none;stroke-width:7}
-  .ring .bgc{stroke:rgba(140,160,185,.12)}
-  .ring .fgc{stroke-linecap:round;stroke-dasharray:163.4;stroke-dashoffset:163.4;transition:stroke-dashoffset 1.6s cubic-bezier(.22,.7,.2,1)}
-  .b1 .fgc{stroke:var(--nv)} .b2 .fgc{stroke:var(--qw)}
-  .in .b1 .fgc{stroke-dashoffset:4.4}  /* 97.3% */
-  .in .b2 .fgc{stroke-dashoffset:34.3} /* 79% */
-  .mini{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px}
-  .mini div{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px 8px;text-align:center}
-  .mini .mn{font-weight:800;font-size:17px;font-variant-numeric:tabular-nums}
-  .mini .ml{font-size:10.5px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase;font-weight:700;margin-top:2px}
-  .bench a.more{display:inline-block;margin-top:18px;font-size:14px;font-weight:700;color:var(--sub);text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:2px;transition:color .2s}
-  .bench a.more:hover{color:var(--ink)}
+/* ---------- links ---------- */
+.links{display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:14px;margin-top:26px}
+.lk{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:19px;transition:.16s;color:inherit}
+.lk:hover{border-color:var(--a);transform:translateY(-2px);text-decoration:none;background:var(--card2)}
+.lk .t{font:700 16px var(--sans);display:flex;justify-content:space-between;gap:10px;align-items:center}
+.lk .t em{font-style:normal;color:var(--a)}
+.lk p{font-size:14px;color:var(--sub);margin-top:6px}
+footer{border-top:1px solid var(--line);padding:38px 0 60px;color:var(--dim);font-size:14px}
+footer a{color:var(--sub)}
+.hr{height:1px;background:var(--line);margin:26px 0}
+.pill{display:inline-block;font:600 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  border-radius:99px;padding:4px 10px;border:1px solid currentColor}
+.p-g{color:var(--g)}.p-y{color:var(--y)}.p-r{color:var(--r)}.p-a{color:var(--a)}
+@media(max-width:560px){
+  .rung,.ladder-hd{grid-template-columns:104px 1fr 74px!important;gap:10px!important;padding-left:13px;padding-right:13px}
+  .rung .nm{font-size:12.5px}.rung .rt{font-size:12px}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto}}
+</style></head><body>
 
-  /* ---------- timeline ---------- */
-  .tl{position:relative;margin-left:10px;padding-left:34px}
-  .tl::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:2px;
-    background:linear-gradient(180deg,var(--nv),var(--qw))}
-  .tl .ev{position:relative;padding-bottom:30px}
-  .tl .ev::before{content:"";position:absolute;left:-40px;top:5px;width:14px;height:14px;border-radius:50%;
-    background:var(--bg);border:3px solid var(--nv);box-shadow:0 0 14px rgba(118,185,0,.5)}
-  .tl .ev:nth-child(even)::before{border-color:var(--qw);box-shadow:0 0 14px rgba(139,109,255,.5)}
-  .tl .d{font-size:12px;font-weight:800;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
-  .tl h5{font-size:17px;font-weight:800;margin:3px 0 4px}
-  .tl p{color:var(--sub);font-size:14.5px;max-width:640px}
+<nav><div class="wrap">
+  <div class="brand">spark<i>y</i></div>
+  <a class="n" href="#machine">The machine</a>
+  <a class="n" href="#fit">Making it fit</a>
+  <a class="n" href="#lanes">Two lanes</a>
+  <a class="n" href="#speed">Speed</a>
+  <a class="n" href="#heat">Heat</a>
+  <a class="n" href="#recipes">Recipes</a>
+  <a class="gh" href="https://github.com/hsrakri/sparky">GitHub ↗</a>
+</div></nav>
 
-  footer{max-width:1060px;margin:60px auto 0;padding:40px 20px 56px;border-top:1px solid var(--line);
-    display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;color:var(--dim);font-size:14px}
-  footer a{color:var(--sub);text-decoration:none;font-weight:600}
-  footer a:hover{color:var(--nv2)}
-
-  @media (prefers-reduced-motion:reduce){
-    *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
-    .reveal{opacity:1;transform:none}
-    .in .membar .mq{width:45%}.in .membar .mn{width:42%}.in .membar .mo{width:13%}
-  }
-</style>
-</head>
-<body>
-<div id="progress"></div>
-
-<nav id="nav">
-  <a href="#stack">Stack</a>
-  <a href="#recipes">Recipes</a>
-  <a href="#crashes">Crashes</a>
-  <a href="#speed">Speed</a>
-  <a href="#benchmarks">Benchmarks</a>
-  <a href="#story">Story</a>
-  <a href="results.html">Results ↗</a>
-  <a href="demo.html">Live demo ↗</a>
-  <a href="speed.html">2× tuning ↗</a>
-  <a href="remotelock.html">Remote lock ↗</a>
-</nav>
-
-<!-- ================= CHANGE BANNER ================= -->
-<div style="max-width:1180px;margin:64px auto 0;padding:0 22px">
-  <div style="background:linear-gradient(100deg,rgba(118,185,0,.12),rgba(139,109,255,.12));border:1px solid var(--line);border-left:3px solid var(--nv);border-radius:14px;padding:16px 20px;font-size:14.5px;line-height:1.55">
-    <b style="color:var(--nv2);letter-spacing:.04em">▲ UPDATE · 2026‑08‑14 · the stack got ~2× faster on both ends</b><br>
-    <b>Orchestrator swapped Nemotron‑3.5 → Qwen3.6‑35B‑A3B (MoE + MTP).</b> Head‑to‑head on this box, Qwen3.6 ran the delegation turn at
-    <b>105.6 tok/s vs 51.7</b> and cut turn latency <b>6.85 s → 2.72 s (2.5×)</b> with clean tool‑calls — so it's now the harness.
-    And the <b>Qwen3.8‑27B coder gained its built‑in MTP head</b>: <b>11.6 → 30.4 tok/s (2.6×)</b>, tool‑calls intact, on our own v0.26 image (no third‑party build).
-    <span style="color:var(--sub)">Details in <a href="recipes/qwen38-27b-dense-optimization.md">Recipe 02</a>. Nemotron kept cached for rollback. Hat‑tip <a href="https://github.com/drowzeys/keys-vLLm.0.27-Qwen3.8-NVFP4-MTP3-Single-DGX-Spark">@drowzeys</a> & @eugr for the MTP‑on‑Spark lead.</span>
+<header><div id="grid"></div><div class="wrap">
+  <div class="tag">● &nbsp;Live in a home lab · GLM-5.3-Flash · EXL3 TR3 4bpw</div>
+  <h1><span>320 billion parameters.</span><span class="hl">Two desktop boxes.</span></h1>
+  <p class="hero-sub">GLM-5.3-Flash is a <b>320B mixture-of-experts</b> model. It has no business running next to a
+    router in a spare room. It does anyway — split across <b>two NVIDIA DGX Sparks</b> wired together with a
+    200-gigabit cable, quantized to four bits, and taught to draft its own tokens.
+    Every number on this page was measured on that machine, today.</p>
+  <div class="stats" id="stats">
+    <div class="stat"><div class="v" data-to="320" data-suf="B">0</div><div class="l">Parameters</div></div>
+    <div class="stat"><div class="v" data-to="164" data-suf=" GB">0</div><div class="l">Weights on disk</div></div>
+    <div class="stat"><div class="v" data-to="756" data-suf="K">0</div><div class="l">KV cache tokens</div></div>
+    <div class="stat"><div class="v" data-to="0.63" data-dec="2" data-suf="s">0</div><div class="l">Fastest reply</div></div>
   </div>
-</div>
+</div></header>
 
-<!-- ================= REMOTE LOCK CARD ================= -->
-<div style="max-width:1180px;margin:22px auto 0;padding:0 22px">
-  <div style="background:linear-gradient(100deg,rgba(118,185,0,.10),rgba(139,109,255,.10));border:1px solid var(--line);border-left:3px solid var(--violet);border-radius:14px;padding:16px 20px;font-size:14.5px;line-height:1.55">
-    <b style="color:var(--violet,var(--nv2));letter-spacing:.04em">🔐 Also built: a $10 remote lock</b><br>
-    A BLE-only August smart lock controlled over WiFi via an ESP32‑C6 Bluetooth proxy + Home Assistant — no subscription bridge.
-    <a href="remotelock.html">Full writeup →</a>
-  </div>
-</div>
+<!-- ============ THE MACHINE ============ -->
+<section id="machine"><div class="wrap">
+  <div class="eyebrow">01 — The machine</div>
+  <h2>Two Sparks, one cable,<br>one model split down the middle.</h2>
+  <p class="lead" style="margin-top:18px;max-width:700px">A single DGX Spark has 128&nbsp;GB of unified memory. The
+    quantized model needs 164&nbsp;GB. So the model gets cut in half — every attention head and every expert
+    layer is split across both machines, and the two halves talk to each other on every single token.</p>
 
-<!-- ================= HERO ================= -->
-<header class="hero">
-  <div class="grid-bg"></div>
-  <div class="orb g"></div><div class="orb v"></div>
-  <span class="kicker"><span class="dot"></span> hsrakri / sparky · home-lab inference engineering</span>
-  <h1>Two brains.<br><span class="grad">One DGX Spark.</span></h1>
-  <p class="tagline">A reasoning <b>orchestrator</b> and a heavyweight <b>coder</b>, co-located on a single GB10 —
-    wired into a live agent, soaked overnight, and written up with <b>every crash and every number</b>.</p>
-  <div class="statrow">
-    <div class="stat reveal"><div class="n"><span data-count="2">0</span>×30B</div><div class="l">models resident</div></div>
-    <div class="stat reveal d1"><div class="n"><span data-count="121">0</span> GiB</div><div class="l">unified memory</div></div>
-    <div class="stat reveal d2"><div class="n"><span data-count="225">0</span></div><div class="l">overnight agent tasks</div></div>
-    <div class="stat reveal d3"><div class="n">$<span data-count="0">0</span></div><div class="l">api cost</div></div>
-  </div>
-  <div class="scrollhint">▾</div>
-</header>
-
-<!-- ================= STACK ================= -->
-<section id="stack">
-  <div class="eyebrow nv reveal">The architecture</div>
-  <h2 class="reveal">Orchestrator thinks.<br>Coder builds.</h2>
-  <p class="lead reveal">Hermes fronts every conversation with a fast reasoning model, and <b>delegates implementation</b> to a stronger coder over the LAN. Both live on the same box — the whole fight is memory and startup order.</p>
-
-  <div class="arch reveal">
-    <div class="node nv">
-      <div class="role">Orchestrator · :8002</div>
-      <h3>Qwen3.6‑35B‑A3B</h3>
-      <div class="spec">MoE · 3B active · NVFP4 · MTP · util 0.42</div>
-      <div class="chips"><span class="chip">105.6 tok/s</span><span class="chip">131K ctx</span><span class="chip">2.72 s / turn</span><span class="chip">clean tools</span></div>
-    </div>
-    <div class="link-col">
-      <span class="flow-label">delegates</span>
-      <div class="flow-line"><i></i></div>
-      <div class="flow-line back"><i></i></div>
-      <span class="flow-label">returns code</span>
-    </div>
-    <div class="node qw">
-      <div class="role">Coder · :8000</div>
-      <h3>Qwen3.8‑27B dense</h3>
-      <div class="spec">dense 27B · NVFP4 · util 0.45 · prefix‑cached</div>
-      <div class="chips"><span class="chip">all 27B fire/token</span><span class="chip">131K ctx</span><span class="chip">tool‑calls ✓</span></div>
-    </div>
+  <div class="card" style="margin-top:30px;padding:26px">
+  <div class="scroller"><svg id="fab" viewBox="0 42 900 216" role="img" aria-label="Diagram: two DGX Sparks connected by a 200 gigabit ConnectX-7 link, each holding half the model">
+    <defs>
+      <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#38bdf8" stop-opacity=".22"/><stop offset="1" stop-color="#38bdf8" stop-opacity=".04"/></linearGradient>
+      <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#c084fc" stop-opacity=".22"/><stop offset="1" stop-color="#c084fc" stop-opacity=".04"/></linearGradient>
+      <linearGradient id="wire" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient>
+    </defs>
+    <!-- spark 1 -->
+    <rect x="34" y="58" width="286" height="186" rx="16" fill="url(#g1)" stroke="#38bdf8" stroke-opacity=".5"/>
+    <text class="box-lbl" x="56" y="90" fill="#38bdf8">sparky1 · 10.100.128.1</text>
+    <text class="box-sub" x="56" y="112">GB10 · 128 GB unified</text>
+    <text class="box-sub" x="56" y="132">TP rank 0 · 82.03 GiB weights</text>
+    <g opacity=".9">
+      <rect x="56" y="150" width="242" height="9" rx="4" fill="#38bdf8" opacity=".65"/>
+      <rect x="56" y="165" width="242" height="9" rx="4" fill="#38bdf8" opacity=".45"/>
+      <rect x="56" y="180" width="180" height="9" rx="4" fill="#38bdf8" opacity=".3"/>
+    </g>
+    <text class="box-sub" x="56" y="212">agent lane :8891 · schedutil · 3.3 GHz cap</text>
+    <!-- spark 2 -->
+    <rect x="580" y="58" width="286" height="186" rx="16" fill="url(#g2)" stroke="#c084fc" stroke-opacity=".5"/>
+    <text class="box-lbl" x="602" y="90" fill="#c084fc">sparky2 · 10.100.128.2</text>
+    <text class="box-sub" x="602" y="112">GB10 · 128 GB unified</text>
+    <text class="box-sub" x="602" y="132">TP rank 1 · 82.03 GiB weights</text>
+    <g opacity=".9">
+      <rect x="602" y="150" width="242" height="9" rx="4" fill="#c084fc" opacity=".65"/>
+      <rect x="602" y="165" width="242" height="9" rx="4" fill="#c084fc" opacity=".45"/>
+      <rect x="602" y="180" width="180" height="9" rx="4" fill="#c084fc" opacity=".3"/>
+    </g>
+    <text class="box-sub" x="602" y="212">coding lane :8892</text>
+    <!-- link -->
+    <line x1="320" y1="151" x2="580" y2="151" stroke="url(#wire)" stroke-width="3" opacity=".8"/>
+    <text class="box-sub" x="450" y="132" text-anchor="middle" fill="#93a3bd">ConnectX-7 · 200 Gb/s · RoCE</text>
+    <text class="box-sub" x="450" y="186" text-anchor="middle" fill="#67788f">all-reduce, every token</text>
+    <g id="pkts"></g>
+  </svg></div>
+  <div class="swipe">← swipe to see both machines →</div>
   </div>
 
-  <div class="mem-eq reveal d1">
-    <div class="eq"><span class="a">0.45</span><span class="c">+</span><span class="b">0.42</span><span class="c">=</span><span class="c">0.87</span><span class="r">— gpu‑memory‑utilization is a per‑process share of the whole pool, not a ceiling. Sum ≲ 0.88, start sequentially, coder first.</span></div>
-    <div class="membar"><div class="mq">coder 0.45</div><div class="mn">orchestrator 0.42</div><div class="mo">OS</div></div>
+  <div class="grid3" style="margin-top:20px">
+    <div class="card">
+      <h3 style="color:var(--a)">Why two</h3>
+      <p style="font-size:14.5px;color:var(--sub);margin-top:9px">164&nbsp;GB of weights will not fit in 128&nbsp;GB.
+        Tensor parallelism splits each layer's matrices column-wise, so each box stores and computes exactly half.</p>
+    </div>
+    <div class="card">
+      <h3 style="color:var(--b)">Why the cable matters</h3>
+      <p style="font-size:14.5px;color:var(--sub);margin-top:9px">Both halves must be recombined at every layer.
+        Over ordinary ethernet that sync dominates. The 200&nbsp;Gb ConnectX link makes it small enough to ignore.</p>
+    </div>
+    <div class="card">
+      <h3 style="color:var(--g)">What you get</h3>
+      <p style="font-size:14.5px;color:var(--sub);margin-top:9px">A 756,736-token KV cache and a 262,144-token
+        context window — long enough to hold an entire codebase in one conversation.</p>
+    </div>
   </div>
-</section>
+</div></section>
 
-<!-- ================= RECIPES ================= -->
-<section id="recipes">
-  <div class="eyebrow qw reveal">The recipes</div>
-  <h2 class="reveal">Everything measured.<br>Nothing hand‑waved.</h2>
-  <p class="lead reveal">Two deep‑dive writeups — the exact flags, the memory math, and the failure modes that cost real hours.</p>
+<!-- ============ MAKING IT FIT ============ -->
+<section id="fit"><div class="wrap">
+  <div class="eyebrow">02 — Making it fit</div>
+  <h2>Four bits, chosen carefully.</h2>
+  <p class="lead" style="margin-top:18px;max-width:700px">Quantization is where most home-lab attempts quietly lose
+    the model's intelligence. The honest way to choose is KL divergence against the full-precision model: how far
+    the compressed model's probability distribution drifts from the original. Lower is better.
+    <b style="color:var(--ink)">Click a rung.</b></p>
 
-  <article class="feature r1 reveal">
-    <div>
-      <div class="num">RECIPE / 01</div>
-      <h3>Co‑locating 2×30B on one GB10</h3>
-      <p>vLLM treats <code>--gpu-memory-utilization</code> as a <b>per‑process reservation that must fit in free memory</b> — so “0.45 + 0.45” doesn’t partition, it races. The recipe: fractions summing ≲ 0.88, sequential startup (coder first), <b>enforce‑eager</b> for the hybrid Mamba‑MoE, and a boot script that makes reboots deterministic.</p>
-      <a class="cta nv" href="https://github.com/hsrakri/sparky/blob/main/README.md">Read the recipe <span>→</span></a>
-    </div>
-    <div class="panel">
-      <div class="t">field notes</div>
-      <div class="krow"><span class="k">models resident</span><span class="v">2 × 30B NVFP4</span></div>
-      <div class="krow"><span class="k">memory at steady state</span><span class="v">~115 / 121.7 GiB</span></div>
-      <div class="krow"><span class="k">startup order</span><span class="v good">coder → orchestrator</span></div>
-      <div class="krow"><span class="k">CUDA‑graph capture, co‑located</span><span class="v bad">deadlocks → eager</span></div>
-      <div class="krow"><span class="k">reboot race</span><span class="v good">fixed: ordered boot script</span></div>
-      <div class="krow"><span class="k">documented failure modes</span><span class="v warn">4</span></div>
-    </div>
-  </article>
-
-  <article class="feature r2 reveal">
-    <div>
-      <div class="num">RECIPE / 02</div>
-      <h3>Qwen3.8‑27B dense — beating the bandwidth roofline</h3>
-      <p>A dense 27B streams <b>all ~14 GB of active weights per token</b>: 273 GB/s ÷ 14 GB ≈ a hard <b>~20 tok/s ceiling</b>. n‑gram speculative decoding (no draft model) hit <b>22.1 tok/s — 1.9×</b> — but broke <code>qwen3_coder</code> tool parsing, so the agent config trades it back. The recipe shows both paths, with acceptance stats.</p>
-      <a class="cta qw" href="https://github.com/hsrakri/sparky/blob/main/recipes/qwen38-27b-dense-optimization.md">Read the recipe <span>→</span></a>
-    </div>
-    <div class="panel">
-      <div class="t">measured, day of release</div>
-      <div class="krow"><span class="k">roofline ceiling (273/14)</span><span class="v">~20 tok/s</span></div>
-      <div class="krow"><span class="k">baseline dense decode</span><span class="v">11.6 tok/s</span></div>
-      <div class="krow"><span class="k">+ n‑gram spec k=5</span><span class="v good">22.1 tok/s (1.9×)</span></div>
-      <div class="krow"><span class="k">tool calls under spec‑decode</span><span class="v bad">mangled args</span></div>
-      <div class="krow"><span class="k">final agent config</span><span class="v good">prefix‑cache, tools clean</span></div>
-      <div class="krow"><span class="k">swap from 3.6 MoE</span><span class="v">3‑line repoint</span></div>
-    </div>
-  </article>
-</section>
-
-<!-- ================= CRASHES ================= -->
-<section id="crashes">
-  <div class="eyebrow am reveal">Field guide</div>
-  <h2 class="reveal">Four ways it crashed<br>before it worked.</h2>
-  <p class="lead reveal">Every one reproduced, root‑caused, and fixed. Tap to expand.</p>
-
-  <details class="crash reveal"><summary><span class="sev">CRASH</span> Both models started together <span class="fixtag">FIXED</span><span class="chev">›</span></summary>
-    <div class="body">Launching two vLLM instances simultaneously at 0.45 + 0.45 races the memory profiler — whoever profiles second sees the other’s memory as used:
-      <code>ValueError: No available memory for the cache blocks.</code>
-      <div class="fix"><b>Fix:</b> start sequentially — coder up, wait for <code>/v1/models</code> 200, then orchestrator.</div></div>
-  </details>
-  <details class="crash reveal d1"><summary><span class="sev">CRASH</span> “Just give the 2nd model 0.9” <span class="fixtag">FIXED</span><span class="chev">›</span></summary>
-    <div class="body">Utilization is a share of <i>total</i> that must fit in <i>free</i> memory:
-      <code>Free memory on device (54.22/121.69 GiB) on startup is less than desired GPU memory utilization (0.9, 109.52 GiB).</code>
-      <div class="fix"><b>Fix:</b> size to free memory → 0.42 for the second model. Sum ≲ 0.88.</div></div>
-  </details>
-  <details class="crash reveal d2"><summary><span class="sev">CRASH</span> Mamba cache “align” mode <span class="fixtag">FIXED</span><span class="chev">›</span></summary>
-    <div class="body">NVIDIA’s recipe flag forces an oversized attention block:
-      <code>AssertionError: In Mamba cache align mode, block_size (4176) must be &lt;= max_num_batched_tokens (2048).</code>
-      <div class="fix"><b>Fix:</b> drop <code>--mamba-cache-mode align</code> (or raise <code>--max-num-batched-tokens ≥ 4176</code>).</div></div>
-  </details>
-  <details class="crash reveal d3"><summary><span class="sev">HANG</span> Silent freeze before weight load <span class="fixtag">FIXED</span><span class="chev">›</span></summary>
-    <div class="body">Co‑located, Nemotron’s torch.compile / CUDA‑graph capture deadlocks at boot — banner prints, memory stays flat, nothing ever loads.
-      <div class="fix"><b>Fix:</b> <code>--enforce-eager</code>. Costs decode speed; boots every time.</div></div>
-  </details>
-</section>
-
-<!-- ================= SPEED ================= -->
-<section id="speed">
-  <div class="eyebrow nv reveal">Single‑stream decode</div>
-  <h2 class="reveal">MoE sprints.<br>Dense grinds. Physics.</h2>
-  <p class="lead reveal">Decode is memory‑bandwidth‑bound: tok/s tracks <b>active bytes per token</b>, not total parameters. A 3B‑active MoE flies; a dense 27B pays for every parameter, every token.</p>
-
-  <div class="chart reveal" data-anim>
-    <h4>tokens / second · measured on this GB10</h4>
-    <div class="bar"><div class="lab">Qwen3.6‑35B <small>MoE · 3B active · MTP</small></div><div class="track"><div class="fill f-qw36 w100"></div></div><div class="val">114</div></div>
-    <div class="bar"><div class="lab">Nemotron‑3.5 30B <small>hybrid MoE · eager</small></div><div class="track"><div class="fill f-nemo w44"></div></div><div class="val">~50</div></div>
-    <div class="bar"><div class="lab">Qwen3.8‑27B + MTP‑3 <small>built‑in draft head · clean tools</small></div><div class="track"><div class="fill f-q38m w27"></div></div><div class="val">30.4</div></div>
-    <div class="bar"><div class="lab">Qwen3.8‑27B + n‑gram <small>fast but mangles tools</small></div><div class="track"><div class="fill f-q38s w19"></div></div><div class="val">22.1</div></div>
-    <div class="bar"><div class="lab">Qwen3.8‑27B <small>baseline · no spec</small></div><div class="track"><div class="fill f-q38b w10"></div></div><div class="val">11.6</div></div>
-    <div class="note"><b>The fix:</b> the checkpoint ships a trained <b>MTP head</b> — enabling it (<code>method:mtp, n=3</code>) gives <b>2.6× with clean tool‑calls</b>, on our own v0.26 image, no third‑party build. n‑gram is faster‑looking but mangles tool parsing. Recipe 02 has the correction + data. Hat‑tip <a href="https://github.com/drowzeys/keys-vLLm.0.27-Qwen3.8-NVFP4-MTP3-Single-DGX-Spark">@drowzeys</a> & @eugr.</div>
+  <div class="ladder-hd" style="display:grid;grid-template-columns:132px 1fr 92px;gap:14px;margin:26px 0 9px;padding:0 15px;
+     font:600 10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--dim)">
+    <span>format</span><span>memory footprint</span><span style="text-align:right">total</span></div>
+  <div class="ladder" id="ladder">
+    <div class="rung" data-gb="640" data-kld="0" data-v="Perfect quality, and about five times more memory than this lab owns. This is the reference everything else is measured against." data-fit="0">
+      <div class="nm">BF16<em>full precision · reference</em></div><div class="bar"><i style="background:linear-gradient(90deg,#475569,#334155)"></i></div><div class="rt">640 GB</div></div>
+    <div class="rung" data-gb="328" data-kld="0.0206" data-v="The official 8-bit release, and the quality bar everything else is judged against. It needs three Sparks. If you have the boxes, run this." data-fit="0">
+      <div class="nm">FP8<em>8-bit · KLD 0.0206</em></div><div class="bar"><i style="background:linear-gradient(90deg,var(--g),#059669)"></i></div><div class="rt">328 GB</div></div>
+    <div class="rung on" data-gb="164" data-kld="0.0246" data-v="What this lab runs. Trellis coding lands within 0.004 nats of the official FP8 release at half its size — and it is both smaller and closer to native than the other 4-bit option. That headroom is what buys the 756K-token KV cache." data-fit="1">
+      <div class="nm">EXL3 TR3 4bpw<em>trellis-coded · KLD 0.0246</em></div><div class="bar"><i style="background:linear-gradient(90deg,var(--a),var(--b))"></i></div><div class="rt">164 GB</div></div>
+    <div class="rung" data-gb="181" data-kld="0.0605" data-v="Nearly three times FP8's divergence, and it is the larger file. It fits and it runs — it just isn't quite the same model any more, and the extra 17 GB comes straight out of the KV cache." data-fit="1">
+      <div class="nm">NVFP4<em>4-bit native · KLD 0.0605</em></div><div class="bar"><i style="background:linear-gradient(90deg,var(--y),#d97706)"></i></div><div class="rt">181 GB</div></div>
   </div>
-</section>
+  <div class="verdict" id="verdict"></div>
 
-<!-- ================= BENCHMARKS ================= -->
-<section id="benchmarks">
-  <div class="eyebrow qw reveal">Overnight, unattended, $0</div>
-  <h2 class="reveal">Then we let it run<br>all night. Twice.</h2>
-  <p class="lead reveal">Not demos — hours of unattended delegation through the live agent, with every task logged to CSV.</p>
-
-  <div class="bench-grid">
-    <div class="bench b1 reveal" data-anim>
-      <div class="ring"><svg width="64" height="64"><circle class="bgc" cx="32" cy="32" r="26"/><circle class="fgc" cx="32" cy="32" r="26"/></svg></div>
-      <div class="big"><span data-count="97" data-dec=".3">0</span>%</div>
-      <div class="cap">Overnight delegation soak</div>
-      <div class="sub">150 back‑to‑back coding tasks, orchestrator → coder</div>
-      <div class="mini">
-        <div><div class="mn">150/150</div><div class="ml">delegated</div></div>
-        <div><div class="mn">1,348</div><div class="ml">llm calls</div></div>
-        <div><div class="mn">0</div><div class="ml">infra failures</div></div>
+  <div class="grid2" style="margin-top:26px">
+    <div class="card">
+      <h3>The memory bill</h3>
+      <div style="margin-top:12px">
+        <div class="kv"><span>Weights, per Spark</span><span>82.03 GiB</span></div>
+        <div class="kv"><span>Weights, total</span><span>164 GB</span></div>
+        <div class="kv"><span>GPU memory utilization</span><span>0.87</span></div>
+        <div class="kv"><span>KV cache</span><span>756,736 tokens</span></div>
+        <div class="kv"><span>Max context per request</span><span>262,144 tokens</span></div>
+        <div class="kv"><span>Concurrent full-context requests</span><span>2.89×</span></div>
       </div>
-      <a class="more" href="https://github.com/hsrakri/sparky/blob/main/benchmarks/overnight-soak-2026-08-12/README.md">full data + CSV →</a>
     </div>
-
-    <div class="bench b2 reveal d1" data-anim>
-      <div class="ring"><svg width="64" height="64"><circle class="bgc" cx="32" cy="32" r="26"/><circle class="fgc" cx="32" cy="32" r="26"/></svg></div>
-      <div class="big"><span data-count="79">0</span>%</div>
-      <div class="cap">Multi‑turn correction stress</div>
-      <div class="sub">75 cycles: write intense code → run it → feed the real error back → revise</div>
-      <div class="mini">
-        <div><div class="mn">1,785</div><div class="ml">coder calls</div></div>
-        <div><div class="mn">~22</div><div class="ml">calls / draft</div></div>
-        <div><div class="mn">0</div><div class="ml">crashes</div></div>
+    <div class="card">
+      <h3>Cold start is real</h3>
+      <p style="font-size:14.5px;color:var(--sub);margin-top:10px">Loading 164&nbsp;GB of weights off disk and
+        warming CUDA graphs is not instant. Plan for it, and never let a watchdog restart the engine casually.</p>
+      <div style="margin-top:12px">
+        <div class="kv"><span>Model load</span><span>344 s</span></div>
+        <div class="kv"><span>Engine init, KV cache, warmup</span><span>78 s</span></div>
+        <div class="kv"><span>Container start to first token</span><span>~8 min</span></div>
       </div>
-      <a class="more" href="https://github.com/hsrakri/sparky/blob/main/benchmarks/stress-corrections/README.md">full data + CSV →</a>
     </div>
   </div>
-  <p class="lead reveal" style="margin-top:30px;max-width:100%">The standout finding: the orchestrator <b>delegates the hard first draft</b> (~22 coder calls) but <b>patches corrections itself</b> — and every failure across both nights was the coder over‑thinking a hard algorithm past its timeout. Never the pipeline.</p>
-</section>
+</div></section>
 
-<!-- ================= STORY ================= -->
-<section id="story">
-  <div class="eyebrow am reveal">Four days in August</div>
-  <h2 class="reveal">The build log.</h2>
-  <p class="lead reveal">A weekend hack with my kid that got out of hand, in the best way.</p>
-  <div class="tl reveal">
-    <div class="ev"><div class="d">Aug 11 · night</div><h5>Nemotron‑3.5‑Lightning drops — tested that night</h5><p>Downloaded, co‑located next to the Qwen coder, survived four crash modes, wired into Hermes as the orchestrator by midnight.</p></div>
-    <div class="ev"><div class="d">Aug 12</div><h5>150‑task overnight soak</h5><p>97.3% pass, 100% delegation, memory flat all night. Reboot ordering hardened with a sequential boot script.</p></div>
-    <div class="ev"><div class="d">Aug 13</div><h5>Correction stress — 75 two‑round cycles</h5><p>Real errors fed back for revision. 1,785 delegated calls surfaced how the orchestrator actually divides labor.</p></div>
-    <div class="ev"><div class="d">Aug 14 · 8am</div><h5>Qwen3.8‑27B releases — swapped in the same morning</h5><p>Detected by a 10‑minute watch cron, downloaded, serving, Hermes repointed, roofline measured, spec‑decode bug found and documented. Recipe shipped by lunch.</p></div>
-  </div>
-</section>
+<!-- ============ TWO LANES ============ -->
+<section id="lanes"><div class="wrap">
+  <div class="eyebrow">03 — Two lanes, one brain</div>
+  <h2>The same model, wearing<br>two different personalities.</h2>
+  <p class="lead" style="margin-top:18px;max-width:720px">A voice assistant wants an answer in under a second. An
+    autonomous coding agent wants deep reasoning and does not care if it waits a minute. Running two models would
+    need memory nobody has. Instead one engine serves two ports with different priorities and different reasoning
+    budgets — and the scheduler always lets the human jump the queue.</p>
 
-<footer>
-  <div>Built by <b>hsrakri</b> with <b>krishavh</b> · MIT · weights under upstream licenses</div>
-  <div>
-    <a href="https://github.com/hsrakri/sparky">GitHub</a> ·
-    <a href="https://github.com/hsrakri/sparky/blob/main/README.md">Recipe 01</a> ·
-    <a href="https://github.com/hsrakri/sparky/blob/main/recipes/qwen38-27b-dense-optimization.md">Recipe 02</a> ·
-    <a href="https://github.com/hsrakri/sparky/blob/main/recipes/glm53-exl3-two-lanes.md">Recipe 03: Two Lanes, One Brain (GLM‑5.3 EXL3)</a> ·
-    <a href="GLM5.3flash/">GLM‑5.3 Flash: the whole story</a>
+  <div class="lanes">
+    <div class="lane" style="--lc:var(--a)">
+      <h4>Agent lane <span class="port">:8891</span></h4>
+      <ul>
+        <li>Scheduler priority <b>0</b> — always served first</li>
+        <li>Reasoning effort <b>low</b>, thinking <b>off</b></li>
+        <li>For voice, chat, home automation</li>
+        <li>Measured today: <b>0.63 – 1.6 s</b> to a reply</li>
+      </ul>
+    </div>
+    <div class="lane" style="--lc:var(--b)">
+      <h4>Coding lane <span class="port">:8892</span></h4>
+      <ul>
+        <li>Scheduler priority <b>10</b> — yields to the human</li>
+        <li>Reasoning effort <b>high</b>, thinking <b>on</b></li>
+        <li>For autonomous build loops and refactors</li>
+        <li>Runs for minutes; nobody is waiting</li>
+      </ul>
+    </div>
   </div>
-</footer>
+
+  <div id="laneviz">
+    <div class="scroller"><canvas id="lanecv" width="1000" height="340" aria-label="Animation of requests queueing into the two lanes"></canvas></div>
+    <div class="swipe">← swipe to follow a request →</div>
+    <div class="ctrls">
+      <button class="btn on" id="b-idle">Coding loop running</button>
+      <button class="btn" id="b-ask">You ask a question</button>
+      <span style="color:var(--dim);font-size:13.5px;align-self:center">
+        Watch the cyan request cut the line. That is <code>--scheduling-policy priority</code>.</span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:20px">
+    <h3>The trap that cost a week</h3>
+    <p style="font-size:15px;color:var(--sub);margin-top:9px">GLM-5.3 defaults <code>reasoning_effort</code> to
+      <b style="color:var(--y)">max</b>. Not medium. Max. A one-line question took 33 seconds and often returned an
+      empty message, because the model spent its whole token budget thinking and had nothing left to say. Setting
+      it explicitly per lane made the assistant <b style="color:var(--g)">25× faster</b> with no loss of quality
+      on short questions.</p>
+<pre><span class="c"># every request, on both lanes — never rely on the default</span>
+{
+  <span class="k">"model"</span>: <span class="s">"brandonmusic/GLM-5.3-Flash-tr3-4bpw"</span>,
+  <span class="k">"messages"</span>: [...],
+  <span class="k">"chat_template_kwargs"</span>: {
+    <span class="k">"reasoning_effort"</span>: <span class="s">"low"</span>,   <span class="c">// "high" on the coding lane</span>
+    <span class="k">"thinking"</span>: false        <span class="c">// true on the coding lane</span>
+  }
+}</pre>
+  </div>
+</div></section>
+
+<!-- ============ SPEED ============ -->
+<section id="speed"><div class="wrap">
+  <div class="eyebrow">04 — Where the speed comes from</div>
+  <h2>A 320B model has no right<br>to feel this quick.</h2>
+  <p class="lead" style="margin-top:18px;max-width:720px">Two tricks do almost all the work. The model drafts its
+    own next tokens and checks them in a batch, and it refuses to re-read text it has already seen.</p>
+
+  <div class="grid2" style="margin-top:30px">
+    <div>
+      <h3>Speculative decoding <span class="pill p-a" style="margin-left:6px">DFlash2 · k=7</span></h3>
+      <p style="font-size:15px;color:var(--sub);margin-top:10px">A small draft model proposes seven tokens ahead.
+        The big model verifies all seven in one pass and keeps the ones it agrees with. Generating tokens one at a
+        time is bandwidth-bound; verifying seven at once is not. Below is the real per-position acceptance rate
+        from a live request — position 1 is almost always right, and acceptance decays with distance.</p>
+      <div class="chart" style="margin-top:18px">
+        <div class="cbars" id="spec"></div>
+        <div style="display:flex;justify-content:space-between;font:11px var(--mono);color:var(--dim)">
+          <span>draft position →</span><span>measured 2026-09-05</span></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="kv"><span>Mean accepted length, best request</span><span>6.61 tokens</span></div>
+        <div class="kv"><span>Draft acceptance, best request</span><span>80.1 %</span></div>
+        <div class="kv"><span>Draft acceptance, typical range</span><span>23 – 80 %</span></div>
+        <div class="kv"><span>Sustained generation</span><span>23.1 tok/s</span></div>
+      </div>
+    </div>
+    <div>
+      <h3>Prefix caching <span class="pill p-g" style="margin-left:6px">4.92× measured</span></h3>
+      <p style="font-size:15px;color:var(--sub);margin-top:10px">An agent sends the same 18,000-token codebase on
+        every turn. Without caching, the model re-reads all of it every time. With caching, the second turn skips
+        straight to the new part. This is the single largest win available to anyone running an agent loop.</p>
+      <div class="chart" style="margin-top:18px">
+        <div class="ba" id="pc">
+          <div class="barow"><span class="bl">cold</span><span class="bb"><i style="background:linear-gradient(90deg,#fb7185,#e11d48)" data-w="100"></i></span><span class="bv" style="color:var(--r)">26.69 s</span></div>
+          <div class="barow"><span class="bl">cached</span><span class="bb"><i style="background:linear-gradient(90deg,#34d399,#059669)" data-w="20.3"></i></span><span class="bv" style="color:var(--g)">5.42 s</span></div>
+        </div>
+        <div style="font:11px var(--mono);color:var(--dim);margin-top:6px">identical 17,874-token prompt, back to back</div>
+      </div>
+      <div class="lesson" style="--lc:var(--y);margin-top:14px">
+        <h4>The page-alignment trap</h4>
+        <p>GLM-5.3's hybrid attention caches in <b class="mono">3584-token pages</b>. If
+          <code>max-num-batched-tokens</code> is not a multiple of that page size, the cache silently never hits and
+          you will never see an error — just a mysteriously slow agent.</p>
+        <div class="fix">MAX_NUM_BATCHED_TOKENS=3584 &nbsp;<span style="color:var(--dim)"># or 7168. Never 8192.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:24px">
+    <h3>Measured today, on the live cluster</h3>
+    <div class="grid3" style="margin-top:14px;gap:14px">
+      <div><div style="font:800 30px var(--sans);color:var(--a)">0.63<small style="font-size:16px;color:var(--sub)"> s</small></div>
+        <div class="l" style="font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-top:6px">Fastest short reply</div></div>
+      <div><div style="font:800 30px var(--sans);color:var(--g)">23.1<small style="font-size:16px;color:var(--sub)"> tok/s</small></div>
+        <div class="l" style="font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-top:6px">Sustained generation</div></div>
+      <div><div style="font:800 30px var(--sans);color:var(--b)">4.92<small style="font-size:16px;color:var(--sub)">×</small></div>
+        <div class="l" style="font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-top:6px">Prefix cache speedup</div></div>
+    </div>
+    <div class="hr"></div>
+    <p class="note">Single-stream numbers on an otherwise idle cluster, agent lane, reasoning effort low. Generation
+      rate varies with draft acceptance — a request the drafter predicts well runs considerably faster than one it doesn't.</p>
+  </div>
+</div></section>
+
+<!-- ============ HEAT ============ -->
+<section id="heat"><div class="wrap">
+  <div class="eyebrow">05 — Heat</div>
+  <h2>The fix was one busy-wait.</h2>
+  <p class="lead" style="margin-top:18px;max-width:700px">One Spark sat at 93.7&nbsp;°C while barely generating
+    anything. The GPU was not the problem. vLLM's worker process was spinning in a one-second busy-wait loop,
+    burning 20 CPU cores doing nothing while it waited for work.</p>
+
+  <div class="ba" style="margin-top:28px;max-width:660px" id="thermal">
+    <div class="barow"><span class="bl">before</span><span class="bb"><i style="background:linear-gradient(90deg,#fb7185,#dc2626)" data-w="100"></i></span><span class="bv" style="color:var(--r)">93.7 °C</span></div>
+    <div class="barow"><span class="bl">after</span><span class="bb"><i style="background:linear-gradient(90deg,#38bdf8,#34d399)" data-w="85.7"></i></span><span class="bv" style="color:var(--g)">80.3 °C</span></div>
+    <div class="barow"><span class="bl">idle now</span><span class="bb"><i style="background:linear-gradient(90deg,#34d399,#059669)" data-w="60.6"></i></span><span class="bv" style="color:var(--g)">56.8 °C</span></div>
+  </div>
+
+  <div class="grid3" style="margin-top:26px">
+    <div class="lesson" style="--lc:var(--a)">
+      <h4>Cut the spin</h4>
+      <p>The worker polls for new work. One second of busy-waiting per poll pins every core at maximum clock.</p>
+      <div class="fix">GLM53_SPINWAIT_MS=16</div>
+    </div>
+    <div class="lesson" style="--lc:var(--b)">
+      <h4>Let the governor breathe</h4>
+      <p>The performance governor holds all 20 cores at peak frequency forever. Schedutil lets them idle down between tokens.</p>
+      <div class="fix">governor = schedutil</div>
+    </div>
+    <div class="lesson" style="--lc:var(--g)">
+      <h4>Cap the boost</h4>
+      <p>The last few hundred megahertz cost disproportionate heat and buy no tokens per second.</p>
+      <div class="fix">max freq = 3.3 GHz</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:20px">
+    <div class="kv"><span>Worker process CPU, before</span><span>198 %</span></div>
+    <div class="kv"><span>Worker process CPU, after</span><span>123 %</span></div>
+    <div class="kv"><span>Throughput cost of the fix</span><span style="color:var(--g)">none measurable</span></div>
+  </div>
+</div></section>
+
+<!-- ============ THE ROAD ============ -->
+<section id="road"><div class="wrap narrow">
+  <div class="eyebrow">06 — How it actually went</div>
+  <h2>Five failures first.</h2>
+  <p class="lead" style="margin-top:18px">The write-ups make this look linear. It was not.</p>
+  <div class="tl">
+    <div class="ev" style="--evc:var(--r)"><h4>Out of memory, repeatedly</h4>
+      <p>The reference NVFP4 recipe simply would not fit. Four separate configurations died during weight load before the cause was clear.</p></div>
+    <div class="ev" style="--evc:var(--r)"><h4>A migration that half-worked</h4>
+      <p>An in-place upgrade allocated a one-million-token KV cache, then never brought the health endpoint up. Rolled back.</p></div>
+    <div class="ev" style="--evc:var(--y)"><h4>It runs — and it is unusably slow</h4>
+      <p>33 seconds for a one-line question, sometimes answering with nothing at all. The reasoning-effort default was eating the entire token budget.</p></div>
+    <div class="ev" style="--evc:var(--y)"><h4>The cache that never hit</h4>
+      <p>Prefix caching was enabled and reported no errors, and still every request paid full price. The batch size was not page-aligned.</p></div>
+    <div class="ev" style="--evc:var(--g)"><h4>Two lanes, and a cool machine</h4>
+      <p>Priority scheduling separated the human from the robots. The spinwait fix took 13&nbsp;°C off the hot Spark for free. This is the setup running now.</p></div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h3>What we would tell someone starting today</h3>
+    <ul style="list-style:none;margin-top:12px">
+      <li style="padding:8px 0 8px 22px;position:relative;font-size:15px;color:var(--sub)"><span style="position:absolute;left:0;color:var(--g)">✓</span> Measure quantization with KL divergence, not with vibes.</li>
+      <li style="padding:8px 0 8px 22px;position:relative;font-size:15px;color:var(--sub)"><span style="position:absolute;left:0;color:var(--g)">✓</span> Set <code>reasoning_effort</code> explicitly on every single request.</li>
+      <li style="padding:8px 0 8px 22px;position:relative;font-size:15px;color:var(--sub)"><span style="position:absolute;left:0;color:var(--g)">✓</span> Page-align the batch size, then prove the cache hits with a repeated prompt.</li>
+      <li style="padding:8px 0 8px 22px;position:relative;font-size:15px;color:var(--sub)"><span style="position:absolute;left:0;color:var(--g)">✓</span> Give the human a priority lane before you let agents loose on the box.</li>
+      <li style="padding:8px 0 8px 22px;position:relative;font-size:15px;color:var(--sub)"><span style="position:absolute;left:0;color:var(--g)">✓</span> Check CPU temperature, not just GPU. The hot part may not be the one computing.</li>
+    </ul>
+  </div>
+</div></section>
+
+<!-- ============ RECIPES ============ -->
+<section id="recipes"><div class="wrap">
+  <div class="eyebrow">07 — Take it with you</div>
+  <h2>Recipes and receipts.</h2>
+  <p class="lead" style="margin-top:16px;max-width:680px">Configuration files, benchmark logs and the longer
+    write-ups. Nothing here is theoretical — it all came off this machine.</p>
+  <div class="links">
+    <a class="lk" href="GLM5.3flash/"><div class="t">The full GLM-5.3 story <em>→</em></div>
+      <p>Bring-up saga, the quant ladder, two-lane design and thermal engineering, at length.</p></a>
+    <a class="lk" href="https://github.com/hsrakri/sparky/blob/main/recipes/glm53-exl3-two-lanes.md"><div class="t">Recipe: two lanes, one brain <em>↗</em></div>
+      <p>Splitting one EXL3 engine into a priority agent lane and a background coding lane.</p></a>
+    <a class="lk" href="deepseekv4flash.html"><div class="t">Before this: DeepSeek-V4-Flash <em>→</em></div>
+      <p>The million-token-context experiment that taught us how two Sparks behave under load.</p></a>
+    <a class="lk" href="speed.html"><div class="t">Speed, in detail <em>→</em></div>
+      <p>The full performance picture across models, quantizations and speculative-decoding settings.</p></a>
+    <a class="lk" href="results.html"><div class="t">Results &amp; challenges <em>→</em></div>
+      <p>Benchmarks, soak tests and the corrections we had to publish when we got something wrong.</p></a>
+    <a class="lk" href="https://github.com/hsrakri/sparky"><div class="t">The repository <em>↗</em></div>
+      <p>Scripts, environment files, raw benchmark output and every page on this site.</p></a>
+    <a class="lk" href="nemotron-era.html"><div class="t">Archive: the one-Spark era <em>→</em></div>
+      <p>Before GLM-5.3 there was a Nemotron orchestrator and a Qwen coder sharing a single GB10. Kept for the numbers.</p></a>
+  </div>
+
+  <div class="card" style="margin-top:26px">
+    <h3>The configuration that matters</h3>
+    <p style="font-size:14.5px;color:var(--sub);margin-top:8px">Six lines that took a week to arrive at.</p>
+<pre style="margin-top:14px"><span class="c"># GLM-5.3-Flash-EXL3-2x-DGX-Sparks/.env</span>
+MODEL=<span class="s">brandonmusic/GLM-5.3-Flash-tr3-4bpw</span>   <span class="c"># EXL3 trellis, KLD 0.0246</span>
+MAX_MODEL_LEN=<span class="s">262144</span>
+MAX_NUM_BATCHED_TOKENS=<span class="s">3584</span>                  <span class="c"># page-aligned, or no cache hits</span>
+GLM53_SPINWAIT_MS=<span class="s">16</span>                          <span class="c"># was 1000. 13 degrees C.</span>
+EXTRA_ARGS=<span class="s">"--scheduling-policy priority"</span>     <span class="c"># quotes are load-bearing</span>
+HEAD_IP=<span class="s">10.100.128.1</span>  WORKER_IP=<span class="s">10.100.128.2</span>    <span class="c"># the 200G fabric</span></pre>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <span><b style="color:var(--sub)">sparky</b> — a home lab that got out of hand.</span>
+    <span style="margin-left:auto"><a href="https://github.com/hsrakri/sparky">github.com/hsrakri/sparky</a></span>
+  </div>
+  <div style="margin-top:12px;font-size:13px">
+    Measurements taken 2026-09-05 on 2× NVIDIA DGX Spark (GB10, 128 GB unified each), vLLM with the
+    MiaAI-Lab EXL3 image, GLM-5.3-Flash TR3 4bpw. Single-stream, idle cluster.
+    Built on the shoulders of <a href="https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks">MiaAI-Lab</a>,
+    whose recipe made all of this possible.
+  </div>
+</div></footer>
 
 <script>
 (function(){
-  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var rm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  /* scroll progress + active nav */
-  var prog = document.getElementById('progress');
-  var links = document.querySelectorAll('#nav a');
-  var secs = [].map.call(links, function(a){ return document.querySelector(a.getAttribute('href')); });
-  addEventListener('scroll', function(){
-    var h = document.documentElement;
-    prog.style.width = (h.scrollTop / (h.scrollHeight - h.clientHeight) * 100) + '%';
-    var y = h.scrollTop + innerHeight * 0.4, idx = -1;
-    secs.forEach(function(s,i){ if (s && s.offsetTop <= y) idx = i; });
-    links.forEach(function(a,i){ a.classList.toggle('active', i === idx); });
-  }, {passive:true});
+  /* ---- count-up stats ---- */
+  document.querySelectorAll('#stats .v').forEach(function(el){
+    var to=parseFloat(el.dataset.to), dec=+(el.dataset.dec||0), suf=el.dataset.suf||'';
+    if(rm){el.innerHTML=to.toFixed(dec)+'<small>'+suf+'</small>';return;}
+    var t0=null, dur=1100, done=false;
+    function snap(){ if(done)return; done=true; el.innerHTML=to.toFixed(dec)+'<small>'+suf+'</small>'; }
+    function tick(t){ if(done)return; t0=t0||t; var p=Math.min(1,(t-t0)/dur), e=1-Math.pow(1-p,3);
+      if(p>=1){snap();return;} el.innerHTML=(to*e).toFixed(dec)+'<small>'+suf+'</small>'; requestAnimationFrame(tick); }
+    if(document.hidden){ snap(); } else { requestAnimationFrame(tick); setTimeout(snap, dur+400); }
+  });
 
-  /* reveal + chart animations */
-  var io = new IntersectionObserver(function(entries){
-    entries.forEach(function(e){
-      if (!e.isIntersecting) return;
-      e.target.classList.add('in');
-      e.target.querySelectorAll('[data-count]').forEach(countUp);
-      io.unobserve(e.target);
+  /* ---- reveal-on-scroll bars ---- */
+  function fillBars(root){ root.querySelectorAll('i[data-w]').forEach(function(i){ i.style.width=i.dataset.w+'%'; }); }
+  var io=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ fillBars(e.target); io.unobserve(e.target);} }); },{threshold:.3});
+  ['pc','thermal'].forEach(function(id){ var n=document.getElementById(id); if(n)io.observe(n); });
+
+  /* ---- quant ladder ---- */
+  var ladder=document.getElementById('ladder'), verdict=document.getElementById('verdict');
+  var maxGb=640;
+  function paintLadder(){
+    [].forEach.call(ladder.children,function(r){
+      var gb=+r.dataset.gb;
+      r.querySelector('.bar i').style.width=(100*gb/maxGb)+'%';
+      r.classList.toggle('dead', r.dataset.fit==='0');
     });
-  }, {threshold:.25});
-  document.querySelectorAll('.reveal,[data-anim]').forEach(function(el){ io.observe(el); });
+  }
+  function selectRung(r){
+    [].forEach.call(ladder.children,function(x){x.classList.remove('on');});
+    r.classList.add('on');
+    var kld=+r.dataset.kld, gb=+r.dataset.gb, fits=r.dataset.fit==='1';
+    var nm=r.querySelector('.nm').firstChild.nodeValue.trim();
+    verdict.innerHTML='<b style="color:'+(fits?'var(--a)':'var(--dim)')+'">'+nm+'</b> — '+
+      (kld? 'KL divergence <b>'+kld.toFixed(4)+'</b> · ':'reference · ')+
+      '<b>'+gb+' GB</b> · '+
+      (fits? '<span class="pill p-g">fits on 2 Sparks</span>' : '<span class="pill p-r">needs more hardware</span>')+
+      '<div style="margin-top:9px;color:var(--sub);font-size:14.5px">'+r.dataset.v+'</div>';
+  }
+  ladder.addEventListener('click',function(e){ var r=e.target.closest('.rung'); if(r)selectRung(r); });
+  paintLadder(); selectRung(ladder.querySelector('.rung.on'));
 
-  /* count-up */
-  function countUp(el){
-    if (el._done) return; el._done = true;
-    var target = +el.getAttribute('data-count'), dec = el.getAttribute('data-dec') || '';
-    if (reduce || target === 0){ el.textContent = target + dec; return; }
-    var t0 = null, dur = 1400;
-    function step(t){
-      if (!t0) t0 = t;
-      var p = Math.min((t - t0) / dur, 1);
-      p = 1 - Math.pow(1 - p, 3);
-      el.textContent = Math.round(target * p) + (p === 1 ? dec : '');
-      if (p < 1) requestAnimationFrame(step);
+  /* ---- speculative decoding chart (real per-position acceptance) ---- */
+  var acc=[0.932,0.898,0.847,0.797,0.763,0.695,0.678];
+  var spec=document.getElementById('spec');
+  spec.innerHTML=acc.map(function(a,i){
+    return '<div class="cb'+(a<.7?' lo':'')+'"><b>'+Math.round(a*100)+'%</b>'+
+           '<div class="tk"><i style="height:0" data-h="'+(a*100)+'"></i></div><span>+'+(i+1)+'</span></div>';
+  }).join('');
+  var io2=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){
+    spec.querySelectorAll('i').forEach(function(i,k){ setTimeout(function(){ i.style.height=i.dataset.h+'%'; }, (rm||document.hidden)?0:k*70); });
+    io2.unobserve(e.target);} }); },{threshold:.4});
+  io2.observe(spec);
+
+  /* ---- fabric packets ---- */
+  if(!rm){
+    var pk=document.getElementById('pkts');
+    for(var i=0;i<5;i++){
+      var c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      c.setAttribute('r','3.5'); c.setAttribute('cy','151'); c.setAttribute('class','pkt');
+      c.setAttribute('fill', i%2 ? '#c084fc' : '#38bdf8');
+      var an=document.createElementNS('http://www.w3.org/2000/svg','animate');
+      an.setAttribute('attributeName','cx');
+      an.setAttribute('values', i%2 ? '580;320' : '320;580');
+      an.setAttribute('dur','1.7s'); an.setAttribute('begin',(i*0.34)+'s'); an.setAttribute('repeatCount','indefinite');
+      c.appendChild(an); pk.appendChild(c);
     }
-    requestAnimationFrame(step);
   }
 
-  /* gentle parallax on hero orbs */
-  if (!reduce){
-    var g = document.querySelector('.orb.g'), v = document.querySelector('.orb.v');
-    addEventListener('scroll', function(){
-      var y = scrollY;
-      if (y < innerHeight * 1.4){
-        g.style.translate = '0 ' + y * .12 + 'px';
-        v.style.translate = '0 ' + y * -.08 + 'px';
-      }
-    }, {passive:true});
+  /* ---- lane visualiser ---- */
+  var cv=document.getElementById('lanecv'), ctx=cv.getContext('2d');
+  var reqs=[], mode='idle', tAcc=0;
+  function spawn(lane){
+    reqs.push({lane:lane, x:-20, y: lane==='a'?92:210, done:false,
+               col: lane==='a'?'#38bdf8':'#c084fc', w: lane==='a'?54:86, prog:0});
   }
+  document.getElementById('b-idle').onclick=function(){ mode='idle'; setBtn(this); };
+  document.getElementById('b-ask').onclick=function(){ mode='ask'; setBtn(this); spawn('a'); };
+  function setBtn(b){ document.querySelectorAll('.ctrls .btn').forEach(function(x){x.classList.remove('on');}); b.classList.add('on'); }
+  function laneFrame(dt){
+    var W=cv.width,H=cv.height;
+    ctx.clearRect(0,0,W,H);
+    // lane rails
+    [['a',92,'#38bdf8','agent lane :8891 — priority 0'],['c',210,'#c084fc','coding lane :8892 — priority 10']].forEach(function(L){
+      ctx.strokeStyle=L[2]+'33'; ctx.lineWidth=2; ctx.setLineDash([7,9]);
+      ctx.beginPath(); ctx.moveTo(20,L[1]); ctx.lineTo(W-190,L[1]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle=L[2]+'cc'; ctx.font='600 20px ui-monospace,Menlo,monospace';
+      ctx.textAlign='left'; ctx.fillText(L[3], 22, L[1]-26);
+    });
+    // the engine
+    var gx=W-170;
+    ctx.fillStyle='#141c27'; ctx.strokeStyle='#2b3b53'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.roundRect(gx,52,150,220,16); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#e9eef7'; ctx.font='700 20px ui-monospace,Menlo,monospace'; ctx.textAlign='center';
+    ctx.fillText('GLM-5.3', gx+75, 140); ctx.fillStyle='#93a3bd'; ctx.font='16px ui-monospace,Menlo,monospace';
+    ctx.fillText('one engine', gx+75, 166); ctx.fillText('two ports', gx+75, 188);
+    // background coding traffic
+    tAcc+=dt;
+    if(tAcc>1.15){ tAcc=0; if(reqs.filter(function(r){return r.lane==='c';}).length<4) spawn('c'); }
+    // is an agent request in flight? coding yields
+    var agentBusy=reqs.some(function(r){return r.lane==='a' && r.x>10;});
+    reqs.forEach(function(r){
+      var speed = r.lane==='a' ? 300 : (agentBusy? 34 : 172);
+      r.x += speed*dt;
+      ctx.fillStyle=r.col; ctx.strokeStyle=r.col;
+      ctx.globalAlpha = (r.lane==='c' && agentBusy) ? .42 : 1;
+      ctx.beginPath(); ctx.roundRect(r.x, r.y-13, r.w, 26, 7); ctx.fill();
+      ctx.globalAlpha=1;
+    });
+    reqs=reqs.filter(function(r){ return r.x < gx+10; });
+    if(agentBusy){ ctx.fillStyle='#fbbf24'; ctx.font='600 17px ui-monospace,Menlo,monospace'; ctx.textAlign='left';
+      ctx.fillText('coding lane throttled — human first', 22, 300); }
+  }
+  var last=performance.now();
+  function loop(t){ var dt=Math.min(.05,(t-last)/1000); last=t; laneFrame(dt); requestAnimationFrame(loop); }
+  if(!rm) requestAnimationFrame(loop); else laneFrame(0);
 })();
 </script>
-</body>
-</html>
+</body></html>
