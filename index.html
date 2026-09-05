@@ -199,12 +199,12 @@ footer a{color:var(--sub)}
 </div></nav>
 
 <header><div id="grid"></div><div class="wrap">
-  <div class="tag">● &nbsp;Live in a home lab · GLM-5.3-Flash · EXL3 TR3 4bpw</div>
+  <div class="tag">● &nbsp;Ran in a home lab, Sep 1–5 2026 · GLM-5.3-Flash · EXL3 TR3 4bpw</div>
   <h1><span>320 billion parameters.</span><span class="hl">Two desktop boxes.</span></h1>
   <p class="hero-sub">GLM-5.3-Flash is a <b>320B mixture-of-experts</b> model. It has no business running next to a
     router in a spare room. It does anyway — split across <b>two NVIDIA DGX Sparks</b> wired together with a
     200-gigabit cable, quantized to four bits, and taught to draft its own tokens.
-    Every number on this page was measured on that machine, today.</p>
+    Every number on this page was measured on that machine on Sep 5, 2026, the day before it was stood down.</p>
   <div class="stats" id="stats">
     <div class="stat"><div class="v" data-to="320" data-suf="B">0</div><div class="l">Parameters</div></div>
     <div class="stat"><div class="v" data-to="164" data-suf=" GB">0</div><div class="l">Weights on disk</div></div>
@@ -528,6 +528,8 @@ footer a{color:var(--sub)}
   <p class="lead" style="margin-top:16px;max-width:680px">Configuration files, benchmark logs and the longer
     write-ups. Nothing here is theoretical — it all came off this machine.</p>
   <div class="links">
+    <a class="lk" href="https://github.com/hsrakri/sparky/tree/main/GLM5.3flash/cluster-snapshot"><div class="t">Bring it back: cluster snapshot <em>↗</em></div>
+      <p>The cluster was stood down on Sep 5 so one Spark could train. Every file needed to restore it in ~8 minutes.</p></a>
     <a class="lk" href="GLM5.3flash/"><div class="t">The full GLM-5.3 story <em>→</em></div>
       <p>Bring-up saga, the quant ladder, two-lane design and thermal engineering, at length.</p></a>
     <a class="lk" href="https://github.com/hsrakri/sparky/blob/main/recipes/glm53-exl3-two-lanes.md"><div class="t">Recipe: two lanes, one brain <em>↗</em></div>
