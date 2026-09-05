@@ -1,0 +1,14 @@
+diff --git a/start.sh b/start.sh
+index e36284c..7bb6374 100755
+--- a/start.sh
++++ b/start.sh
+@@ -1168,6 +1168,7 @@ launch_cluster() {
+         -e TRANSFORMERS_OFFLINE=1
+         -e HF_HOME=/root/.cache/huggingface
+         -e VLLM_CACHE_ROOT=/root/.cache/vllm
++        -e "VLLM_PREFIX_CACHE_RETENTION_INTERVAL=${VLLM_PREFIX_CACHE_RETENTION_INTERVAL:-}"
+         -e "GLM53_SUPPRESS_STOPS_IN_REASONING=$GLM53_SUPPRESS_STOPS_IN_REASONING"
+         -e "GLM53_MIXED_PREFILL_CHUNK=$GLM53_MIXED_PREFILL_CHUNK"
+         -e "GLM53_INDEXER_WORKSPACE=$GLM53_INDEXER_WORKSPACE"
+# kit commit: c707598ebcf02fd827d079a7c47e785069425efe
+# image id: sha256:6d06c423c27bc7050781b028f4ee732e6a09642663fc3e200f91b5261e8d2617
